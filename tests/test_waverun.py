@@ -56,7 +56,7 @@ def test_launch_dry_run_writes_scripts(prepared: Path) -> None:
     campaign = load_campaign(prepared / "namd_campaign.yaml")
     result = launch_waverun(campaign, chunk=2)
     assert result["mode"] == "dry-run"
-    scripts = list((prepared / "snapshots").glob("*waverun*.sh"))
+    scripts = sorted((prepared / "snapshots").glob("*waverun*.sh"))
     assert len(scripts) == 2
     body = scripts[0].read_text(encoding="utf-8")
     assert "srun -n 128 vasp_gam" in body
