@@ -71,6 +71,38 @@ def test_rejects_stored_window_not_enclosing(tmp_path: Path) -> None:
         load_campaign(camp)
 
 
+def test_rejects_inicon_bands_outside_namd_window(campaign_dir: Path) -> None:
+    path = campaign_dir / "namd_campaign.yaml"
+    path.write_text(path.read_text(encoding="utf-8").replace("band_max: 5", "band_max: 6"), encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="active window"):
+        load_campaign(path)
+
+
+def test_rejects_single_state_hefei_window(campaign_dir: Path) -> None:
+    path = campaign_dir / "namd_campaign.yaml"
+    text = path.read_text(encoding="utf-8").replace("bmin: 4\n  bmax: 5\n  nsw", "bmin: 5\n  bmax: 5\n  nsw")
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="at least two states"):
+        load_campaign(path)
+
+
+def test_rejects_mismatched_initial_condition_count(campaign_dir: Path) -> None:
+    path = campaign_dir / "namd_campaign.yaml"
+    # The fixture uses nsample: 2 in both blocks; change only the first occurrence.
+    text = path.read_text(encoding="utf-8").replace("nsample: 2", "nsample: 3", 1)
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="must equal"):
+        load_campaign(path)
+
+
+def test_rejects_n2amd_as_production_nac_engine(campaign_dir: Path) -> None:
+    path = campaign_dir / "namd_campaign.yaml"
+    text = path.read_text(encoding="utf-8").replace("nac:\n", "nac:\n  engine: n2amd\n")
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(ConfigurationError, match="nac.engine"):
+        load_campaign(path)
+
+
 def test_profile_requires_partition_account_only_for_slurm(tmp_path: Path) -> None:
     good = _write(tmp_path / "local.yaml", "scheduler: local\njobs: {a: {command: echo hi}}\n")
     profile = load_profile(good)

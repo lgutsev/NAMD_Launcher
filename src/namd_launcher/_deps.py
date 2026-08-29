@@ -8,8 +8,9 @@ engine (see ``third_party/README.md``). Each is resolved from, in order:
 3. the ``third_party/_src/<name>`` checkout that ``third_party/fetch.sh`` makes;
 4. (for importable packages) the active Python environment.
 
-Resolution is best effort: ``prepare`` records what it found and WARNs;
-``run`` / ``launch`` is where a missing dependency becomes an error.
+Resolution is best effort. CA-NAC ``run`` rejects a missing local installation
+unless explicitly allowed; Hefei launch scripts may rely on scheduler modules
+that expose the selected binary only on a compute node.
 """
 
 from __future__ import annotations
@@ -87,8 +88,11 @@ def resolve_hefei_binary(binary: str, namd: dict[str, Any]) -> dict[str, Any]:
         candidate = Path(explicit).expanduser() / binary
         if candidate.is_file():
             return {"name": binary, "path": str(candidate.resolve()), "found": True, "how": "namd.binary_dir"}
-    for sub in ("dish", "namd", "namdK"):
-        candidate = _REPO_SRC / "Hefei-NAMD" / "src" / sub / binary
+    candidates = [
+        _REPO_SRC / "Hefei-NAMD-DEV" / binary,
+        *(_REPO_SRC / "Hefei-NAMD" / "src" / sub / binary for sub in ("dish", "namd", "namdK")),
+    ]
+    for candidate in candidates:
         if candidate.is_file():
             return {"name": binary, "path": str(candidate.resolve()), "found": True, "how": "third_party/_src build"}
     which = shutil.which(binary)
@@ -99,7 +103,7 @@ def resolve_hefei_binary(binary: str, namd: dict[str, Any]) -> dict[str, Any]:
         "path": None,
         "found": False,
         "how": "not found",
-        "hint": f"build it (bash third_party/fetch.sh; make in src/dish|src/namd), put {binary} on PATH, "
+        "hint": f"build it (bash third_party/fetch.sh; see docs/hefei-namd.md), put {binary} on PATH, "
         "or set namd.binary_dir / point the hefei_namd job's command at its full path.",
     }
 

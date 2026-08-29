@@ -45,10 +45,10 @@ def campaign_dir(tmp_path: Path) -> Path:
               gamma: true
               nproc: 2
             inicon:
-              nsample: 5
+              nsample: 2
               tmax: 3
               band_min: 5
-              band_max: 6
+              band_max: 5
               seed: 7
             namd:
               branch: dev

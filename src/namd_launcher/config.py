@@ -22,7 +22,7 @@ import yaml
 from .errors import ConfigurationError
 
 SCHEMA_VERSION = 1
-NAC_ENGINES = ("ca-nac", "n2amd")
+NAC_ENGINES = ("ca-nac",)
 NAMD_BRANCHES = ("dev", "master")
 NAMD_ALGORITHMS = ("DISH", "FSSH")
 
@@ -228,8 +228,8 @@ def _validate_namd(namd: dict[str, Any]) -> dict[str, Any]:
     namd["rundir"] = str(namd.get("rundir", "."))
     if namd.get("binary_dir"):
         namd["binary_dir"] = str(Path(str(namd["binary_dir"])).expanduser())
-    if {"bmin", "bmax"} <= namd.keys() and namd["bmin"] > namd["bmax"]:
-        raise ConfigurationError("namd.bmin must not exceed namd.bmax")
+    if {"bmin", "bmax"} <= namd.keys() and namd["bmin"] >= namd["bmax"]:
+        raise ConfigurationError("namd.bmin must be below namd.bmax (Hefei-NAMD needs at least two states)")
     return namd
 
 
@@ -247,6 +247,56 @@ def _validate_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
         raise ConfigurationError("analysis.model currently supports only 'single_exp'")
     analysis["normalize"] = _bool(analysis.get("normalize", True), "analysis.normalize")
     return analysis
+
+
+def _validate_cross_fields(
+    snapshots: dict[str, Any],
+    nac: dict[str, Any],
+    dephasing: dict[str, Any],
+    inicon: dict[str, Any],
+    namd: dict[str, Any],
+) -> None:
+    """Reject campaign combinations that Hefei-NAMD cannot safely execute."""
+
+    for left, right, label in (
+        (nac.get("bmin"), namd.get("bmin"), "bmin"),
+        (nac.get("bmax"), namd.get("bmax"), "bmax"),
+    ):
+        if left is not None and right is not None and left != right:
+            raise ConfigurationError(f"nac.{label} must equal namd.{label} ({left} != {right})")
+
+    if namd.get("bmin") is not None and namd.get("bmax") is not None:
+        band_min = inicon.get("band_min")
+        band_max = inicon.get("band_max")
+        if band_min is not None and band_max is not None:
+            if band_min < namd["bmin"] or band_max > namd["bmax"]:
+                raise ConfigurationError(
+                    "inicon band range must lie inside the Hefei-NAMD active window: "
+                    f"[{band_min}, {band_max}] is outside [{namd['bmin']}, {namd['bmax']}]"
+                )
+
+    if inicon.get("nsample") is not None and namd.get("nsample") is not None:
+        if inicon["nsample"] != namd["nsample"]:
+            raise ConfigurationError(
+                "inicon.nsample must equal namd.nsample so every generated initial condition is used "
+                f"({inicon['nsample']} != {namd['nsample']})"
+            )
+
+    if namd.get("nsw") is not None and namd["nsw"] > snapshots["nsw"] - 1:
+        raise ConfigurationError(
+            "namd.nsw cannot exceed snapshots.nsw - 1 because time-overlap NACs require adjacent frames "
+            f"({namd['nsw']} > {snapshots['nsw'] - 1})"
+        )
+
+    nac_potim = float(nac.get("potim", snapshots["potim"]))
+    if namd.get("potim") is not None and abs(float(namd["potim"]) - nac_potim) > 1e-12:
+        raise ConfigurationError(
+            f"namd.potim must match the retained-snapshot NAC timestep ({namd['potim']} != {nac_potim})"
+        )
+    if abs(float(dephasing["dt_fs"]) - nac_potim) > 1e-12:
+        raise ConfigurationError(
+            f"dephasing.dt_fs must match the retained-snapshot NAC timestep ({dephasing['dt_fs']} != {nac_potim})"
+        )
 
 
 def load_campaign(path: str | Path) -> Campaign:
@@ -278,20 +328,30 @@ def load_campaign(path: str | Path) -> Campaign:
         raise ConfigurationError("profile is required")
     profile_path = _resolve(root, str(profile_value)).resolve()
 
+    source = _validate_source(_mapping(data.get("source"), "source"))
+    snapshots = _validate_snapshots(_mapping(data.get("snapshots"), "snapshots"))
+    bands = _validate_bands(_mapping(data.get("bands"), "bands"))
+    nac = _validate_nac(_mapping(data.get("nac"), "nac"))
+    dephasing = _validate_dephasing(_mapping(data.get("dephasing"), "dephasing"))
+    inicon = _validate_inicon(_mapping(data.get("inicon"), "inicon"))
+    namd = _validate_namd(_mapping(data.get("namd"), "namd"))
+    analysis = _validate_analysis(_mapping(data.get("analysis"), "analysis"))
+    _validate_cross_fields(snapshots, nac, dephasing, inicon, namd)
+
     return Campaign(
         path=config_path,
         root=root,
         name=name,
         description=description,
         profile_path=profile_path,
-        source=_validate_source(_mapping(data.get("source"), "source")),
-        snapshots=_validate_snapshots(_mapping(data.get("snapshots"), "snapshots")),
-        bands=_validate_bands(_mapping(data.get("bands"), "bands")),
-        nac=_validate_nac(_mapping(data.get("nac"), "nac")),
-        dephasing=_validate_dephasing(_mapping(data.get("dephasing"), "dephasing")),
-        inicon=_validate_inicon(_mapping(data.get("inicon"), "inicon")),
-        namd=_validate_namd(_mapping(data.get("namd"), "namd")),
-        analysis=_validate_analysis(_mapping(data.get("analysis"), "analysis")),
+        source=source,
+        snapshots=snapshots,
+        bands=bands,
+        nac=nac,
+        dephasing=dephasing,
+        inicon=inicon,
+        namd=namd,
+        analysis=analysis,
         raw=raw,
     )
 

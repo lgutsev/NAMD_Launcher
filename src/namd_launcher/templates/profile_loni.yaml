@@ -43,8 +43,8 @@ jobs:
     time: "72:00:00"
     modules: [mpich/4.0.2/intel-19.0.5]
     environment: {OMP_NUM_THREADS: "1"}
-    # DEV branch binary is `hfnamd`; master branch is `namd` (FSSH) / `dish`.
-    command: "mpirun -np {ntasks} hfnamd"
+    # Leave command unset so `namd.branch` + `namd.algo` select hfnamd/dish/namd.
+    # Set a full command only when the cluster environment requires an override.
 
   # ---- serial post-processing (dephase / inicon / shprop / ksplot) ----
   analysis:

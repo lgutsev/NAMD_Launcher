@@ -1,63 +1,89 @@
-# N2AMD as an optional step 3 — feasibility
+# N²AMD research preview
 
-> **Status: not implemented.** `inamd n2amd {status,plan,export}` are scoping
-> aids only. This document is the assessment the user asked for.
+> **Support level: research preview, not part of the production pipeline.**
+> `inamd n2amd {status,plan,export}` only scopes a possible future study. It
+> does not train HamGNN, predict Hamiltonians, calculate NACs, or submit jobs.
 
-## What N2AMD is
+The supported workflow is:
 
-**N²AMD** (Neural-Network Non-Adiabatic Molecular Dynamics) replaces the
-DFT/CA-NAC evaluation of the electronic structure along an AIMD path with an
-**E(3)-equivariant deep Hamiltonian** (HamGNN). The model maps each instantaneous
-geometry directly to a Kohn–Sham Hamiltonian matrix — no SCF — from which
-eigenvalues, wavefunction overlaps and non-adiabatic couplings are obtained.
-Those feed **Hefei-NAMD** with DISH under the classical-path approximation,
-i.e. exactly the same downstream path this launcher already drives.
+```text
+InterfaceForge trajectory
+  -> VASP snapshot SCFs
+  -> CA-NAC
+  -> dephasing / INICON
+  -> Hefei-NAMD
+  -> SHPROP analysis
+```
+
+## Why N²AMD is de-emphasized
+
+N²AMD uses an E(3)-equivariant HamGNN model to predict electronic
+Hamiltonians in a numerical atomic-orbital (NAO) basis. The 2025 work
+demonstrated efficient classical-path NAMD with Hefei-NAMD, including
+hybrid-functional calculations:
 
 - Zhang et al., *Advancing nonadiabatic molecular dynamics simulations in
-  solids with E(3) equivariant deep neural Hamiltonians*, **Nat. Commun.**
-  **16** (2025); arXiv:2408.06654.
+  solids with E(3) equivariant deep neural Hamiltonians*, **Nature
+  Communications 16** (2025), DOI: 10.1038/s41467-025-57328-1.
 - HamGNN: <https://github.com/QuantumLab-ZY/HamGNN>
-- N2AMD code: Figshare (linked from the paper); interfaces to HamGNN and
-  Hefei-NAMD.
-- Validated on TiO₂ and GaAs at HSE06; corrects order-of-magnitude carrier-
-  dynamics errors from the standard procedure in a MoS₂/WS₂ heterostructure.
+- N²AMD code and tutorial: <https://doi.org/10.6084/m9.figshare.26629405>
 
-## Where it slots into this workflow
+For a passivated Pb/I perovskite slab, however, this is a separate research
+project rather than an easy launcher stage. A useful model would have to cover
+the heavy-element/SOC treatment, surface and vacuum geometries, organic
+passivants, defects, distortions, and interfacial electronic states. Its
+electronic labels must come from a compatible NAO code and be cross-validated
+against the intended VASP reference.
 
-It **replaces stages 2 + 4** (`waverun` + `nac`):
+## Correct feasibility assessment
 
+| item | assessment |
+|---|---|
+| Reusing an InterfaceForge trajectory | feasible for geometries |
+| VASP as HamGNN label source | not direct; VASP does not emit the compatible NAO Hamiltonian/overlap representation |
+| Label backends | OpenMX, ABACUS, or SIESTA/HONPAS |
+| Training-set size | system dependent; published examples used 300–2000 structures, not a universal requirement |
+| PBE usefulness | possible for large, long, or repeated calculations; HSE06 is an important motivation, not the only one |
+| Pb/I systems | SOC treatment and parity against direct calculations are mandatory decisions |
+| Current launcher support | scoping commands only |
+
+Current HamGNN uses `graph_data.npz` and optionally LMDB. Prediction also
+requires backend-specific graph construction and overlap/H0 preprocessing; the
+operational input is therefore more than an `XDATCAR` alone.
+
+## Safest future integration
+
+Do not write a new direct `NATXT` converter. Current CA-NAC already supports
+`software='HAMGNNHUGE'` and reads per-frame eigenvector, eigenvalue, and sparse
+overlap arrays. A future production implementation should be:
+
+```text
+NAO reference data
+  -> graph_data.npz / LMDB
+  -> HamGNN training and prediction
+  -> per-frame wfc.npy + eigen.npy + SKS*.npy
+  -> CA-NAC HAMGNNHUGE backend
+  -> EIGTXT + NATXT
+  -> existing dephase / INICON / Hefei-NAMD stages
 ```
-                     ┌─ CA-NAC path:  snapshots ─▶ waverun (500 VASP SCF) ─▶ nac ─┐
-Step2 XDATCAR  ──────┤                                                            ├─▶ EIGTXT / NATXT ─▶ dephase ─▶ inicon ─▶ hefei ─▶ shprop
-                     └─ N2AMD path:   train HamGNN ─▶ predict H(t) ─▶ eig + NAC ──┘
-```
 
-Everything from `inamd dephase` onward is **unchanged** — N2AMD just has to
-write `nac/EIGTXT` and `nac/NATXT` in the same format `inamd nac collect` does.
+This matters because Hefei-NAMD expects CA-NAC's phase-corrected,
+antisymmetrized overlap numerator in `NATXT` and applies its own
+`1/(2*POTIM)` scaling. A file containing already differentiated couplings can
+have the right dimensions while being physically mis-scaled.
 
-## Integration cost (honest)
+Before enabling such a path, require held-out parity tests for:
 
-| item | difficulty | note |
-|---|---|---|
-| Downstream hand-off | **easy** | same two text files; `dephase`/`inicon`/`hefei`/`shprop` already consume them |
-| HamGNN install | easy–moderate | torch + e3nn + GPU; `inamd n2amd status` probes for these |
-| **Training data** | **hard — the real blocker** | needs 500–2000 DFT Hamiltonians *in an LCAO basis*. **VASP cannot export one.** You must generate them with openmx / ABACUS / HONPAS (or the N2AMD pipeline), which means a second DFT stack and a basis-set convergence study for the target chemistry |
-| HSE06 references | expensive | the *reason* to use N2AMD is hybrid-functional NAC; HSE06 on a 3×3×3 FAPI cell is ~10–50× a PBE SCF, ×(500–2000 structures) |
-| Transferability | study required | the model must hold across the thermal ensemble and any strain/defect configs of interest; needs a held-out eigenvalue + NAC parity check vs direct DFT |
+1. Hamiltonian and band-edge errors;
+2. generalized eigenvectors and overlap convention;
+3. state ordering, phase continuity, and trivial crossings;
+4. `EIGTXT` energy units and `NATXT` normalization;
+5. direct-DFT versus predicted NAC time series;
+6. final population dynamics and lifetime sensitivity.
 
-## Recommendation
+## Newer on-the-fly work
 
-For the current PBE-level perovskite runs, N2AMD offers **no advantage** — the
-CA-NAC path is already parallel and cheap enough. N2AMD becomes worth the
-integration effort when you want **hybrid-functional (HSE06) NAC**, **much
-larger cells**, or **ns-scale trajectories** where re-running 10³–10⁴ VASP SCFs
-is the bottleneck. At that point the plan is:
-
-1. `inamd n2amd export` — freeze the trajectory + band window, get the checklist.
-2. Stand up the LCAO-DFT reference stack; generate the training set.
-3. Train HamGNN; validate eigenvalue + NAC parity on held-out frames.
-4. Predict `H(t)` over the Step2 `XDATCAR`; emit `nac/EIGTXT` + `nac/NATXT`.
-5. `inamd dephase && inamd inicon && inamd hefei prepare && inamd hefei launch --execute`.
-
-A future `namdforge` release could add `inamd n2amd train` / `inamd n2amd
-predict` around steps 2–4 once the reference-data path is settled.
+The August 2026 on-the-fly N²AMD work adds excited-state forces and NAC vectors
+beyond a fixed classical trajectory (arXiv:2608.08095). That is scientifically
+distinct from this launcher's classical-path workflow and is not presented as
+a drop-in step here.

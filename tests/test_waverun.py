@@ -61,6 +61,8 @@ def test_launch_dry_run_writes_scripts(prepared: Path) -> None:
     body = scripts[0].read_text(encoding="utf-8")
     assert "srun -n 128 vasp_gam" in body
     assert 'for i in $(seq -f "%03g" 1 2); do' in body
+    assert "General timing and accounting" in body
+    assert "[ -s WAVECAR ]" in body
     assert all(row["status"] == "planned" for row in result["jobs"])
 
 
@@ -70,6 +72,7 @@ def test_launch_array(prepared: Path) -> None:
     body = Path(result["scripts"][0]).read_text(encoding="utf-8")
     assert "#SBATCH --array=1-3%5" in body
     assert "SLURM_ARRAY_TASK_ID" in body
+    assert "already complete, skipping" in body
 
 
 def test_audit_reports_convergence(prepared: Path) -> None:

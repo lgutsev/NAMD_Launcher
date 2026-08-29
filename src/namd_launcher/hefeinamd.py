@@ -16,6 +16,7 @@ from the ``nac/`` stage and cross-checked against the band window.
 from __future__ import annotations
 
 import argparse
+import shlex
 import shutil
 from importlib import resources
 from pathlib import Path
@@ -35,19 +36,55 @@ STAGE = "hefei"
 _BINARY = {"dev": "hfnamd", "master": {"DISH": "dish", "FSSH": "namd"}}
 
 
-def _count_columns(path: Path) -> int:
-    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        if line.strip():
-            return len(line.split())
-    return 0
-
-
 def _count_rows(path: Path) -> int:
     return sum(1 for line in path.open() if line.strip())
 
 
-def _dephtime_dim(path: Path) -> int:
-    return _count_columns(path)
+def _table_shape(path: Path) -> tuple[int, int] | None:
+    rows = [line.split() for line in path.read_text(encoding="utf-8", errors="ignore").splitlines() if line.strip()]
+    if not rows:
+        return (0, 0)
+    widths = {len(row) for row in rows}
+    if len(widths) != 1:
+        return None
+    return len(rows), widths.pop()
+
+
+def _validate_inicon_rows(campaign: Campaign, path: Path, frames: int) -> list[str]:
+    issues: list[str] = []
+    parsed: list[tuple[int, int]] = []
+    for lineno, line in enumerate(path.read_text(encoding="utf-8", errors="ignore").splitlines(), start=1):
+        if not line.strip():
+            continue
+        fields = line.split()
+        try:
+            if len(fields) != 2:
+                raise ValueError
+            parsed.append((int(fields[0]), int(fields[1])))
+        except ValueError:
+            issues.append(f"INICON line {lineno} must contain exactly two integers: <start step> <start band>")
+
+    nsample = int(campaign.namd["nsample"])
+    if len(parsed) != nsample:
+        issues.append(f"INICON has {len(parsed)} rows, expected exactly namd.nsample={nsample}")
+
+    bmin, bmax = int(campaign.namd["bmin"]), int(campaign.namd["bmax"])
+    algo = campaign.namd["algo"]
+    namdtime = int(campaign.namd["namdtime"])
+    for index, (start, band) in enumerate(parsed, start=1):
+        if not bmin <= band <= bmax:
+            issues.append(f"INICON row {index}: band {band} is outside active window [{bmin}, {bmax}]")
+        if not 1 <= start <= frames:
+            issues.append(f"INICON row {index}: start step {start} is outside available frames [1, {frames}]")
+        if algo == "FSSH":
+            if start <= 1:
+                issues.append(f"INICON row {index}: FSSH start step must be greater than 1")
+            if start + namdtime - 1 > int(campaign.namd["nsw"]):
+                issues.append(
+                    f"INICON row {index}: FSSH start {start} + NAMDTIME {namdtime} exceeds NSW "
+                    f"{campaign.namd['nsw']}"
+                )
+    return issues
 
 
 def render_inp(campaign: Campaign) -> tuple[str, dict[str, Any]]:
@@ -57,7 +94,7 @@ def render_inp(campaign: Campaign) -> tuple[str, dict[str, Any]]:
             raise SafetyError(f"campaign namd: block needs {key}")
     bmin, bmax = int(namd["bmin"]), int(namd["bmax"])
     nbasis = bmax - bmin + 1
-    potim = float(namd.get("potim", 1.0))
+    potim = float(namd.get("potim", campaign.nac.get("potim", campaign.snapshots["potim"])))
     temp = float(namd.get("temp", 300.0))
     algo = namd["algo"]
     branch = namd["branch"]
@@ -130,22 +167,28 @@ def _validate_inputs(campaign: Campaign, namd_root: Path, nac_root: Path, meta: 
         issues.append("DISH needs DEPHTIME (run `inamd dephase`)")
 
     if not issues:
-        nat_cols = _count_columns(natxt)
-        if nat_cols != nbasis * nbasis:
-            issues.append(f"NATXT has {nat_cols} columns, expected nbasis^2 = {nbasis * nbasis}")
-        eig_cols = _count_columns(eigtxt)
-        if eig_cols != nbasis:
-            issues.append(f"EIGTXT has {eig_cols} columns, expected nbasis = {nbasis}")
-        frames = _count_rows(eigtxt)
+        nat_shape = _table_shape(natxt)
+        eig_shape = _table_shape(eigtxt)
+        if nat_shape is None:
+            issues.append("NATXT has inconsistent row widths")
+        elif nat_shape[1] != nbasis * nbasis:
+            issues.append(f"NATXT has {nat_shape[1]} columns, expected nbasis^2 = {nbasis * nbasis}")
+        if eig_shape is None:
+            issues.append("EIGTXT has inconsistent row widths")
+        elif eig_shape[1] != nbasis:
+            issues.append(f"EIGTXT has {eig_shape[1]} columns, expected nbasis = {nbasis}")
+        frames = eig_shape[0] if eig_shape is not None else _count_rows(eigtxt)
+        if nat_shape is not None and eig_shape is not None and nat_shape[0] != eig_shape[0]:
+            issues.append(f"NATXT has {nat_shape[0]} rows but EIGTXT has {eig_shape[0]} rows")
         if int(campaign.namd["nsw"]) > frames:
             issues.append(f"namd.nsw={campaign.namd['nsw']} exceeds {frames} NAC frames (EIGTXT rows)")
-        inicon_rows = _count_rows(nac_root / "INICON")
-        if int(campaign.namd["nsample"]) > inicon_rows:
-            issues.append(f"namd.nsample={campaign.namd['nsample']} exceeds INICON rows ({inicon_rows})")
+        issues.extend(_validate_inicon_rows(campaign, nac_root / "INICON", frames))
         if meta["algo"] == "DISH":
-            dim = _dephtime_dim(nac_root / "DEPHTIME")
-            if dim != nbasis:
-                issues.append(f"DEPHTIME is {dim}x{dim}, expected {nbasis}x{nbasis}")
+            shape = _table_shape(nac_root / "DEPHTIME")
+            if shape is None:
+                issues.append("DEPHTIME has inconsistent row widths")
+            elif shape != (nbasis, nbasis):
+                issues.append(f"DEPHTIME is {shape[0]}x{shape[1]}, expected {nbasis}x{nbasis}")
     return issues
 
 
@@ -205,7 +248,13 @@ def launch_hefei(campaign: Campaign, *, execute: bool = False) -> dict[str, Any]
     resolved = resolve_hefei_binary(meta["binary"], campaign.namd)
     default_command = str(profile["jobs"]["hefei_namd"].get("command", "")).strip()
     exe = resolved["path"] if (resolved["found"] and resolved["how"] != "PATH") else meta["binary"]
-    command = default_command or f"mpirun -np {{ntasks}} {exe}"
+    exe = shlex.quote(str(exe))
+    if default_command:
+        command = default_command
+    elif profile["scheduler"] == "local":
+        command = exe
+    else:
+        command = f"mpirun -np {{ntasks}} {exe}"
     script = render_job(
         profile, "hefei_namd", command=command,
         job_name=f"{campaign.name}_namd", working_directory=namd_root.as_posix(),

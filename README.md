@@ -37,8 +37,12 @@ step2-*` run directory is a first-class input here.
   <https://github.com/QijingZheng/VaspBandUnfolding>.
 - **`mod_hungarian.py`** (used by CA-NAC's state reordering) — Alexey V.
   Akimov, from the Libra project (GPL-2.0+).
-- **N2AMD** — Zhang et al., *Nat. Commun.* **16** (2025); arXiv:2408.06654
-  (see [`docs/n2amd.md`](docs/n2amd.md) for the optional step-3 integration).
+- **N²AMD** — Zhang et al., *Nat. Commun.* **16** (2025); arXiv:2408.06654.
+  It is documented only as a future research pathway; it is not part of the
+  supported pipeline (see [`docs/n2amd.md`](docs/n2amd.md)).
+- **Hefei-NAMD-DEV** — Changwei Zhang and Weibin Chu, public MIT-licensed
+  unified `hfnamd` engine used by the N²AMD workflow. Repository:
+  <https://github.com/zhang-changwei/Hefei-NAMD-DEV>.
 
 If NAMD Launcher contributes to published work, cite the packages above; a
 citation of this launcher itself is optional (see `CITATION.cff`).
@@ -50,12 +54,12 @@ git clone https://github.com/lgutsev/NAMD_Launcher.git
 cd NAMD_Launcher
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"          # or ".[report]" for just the plotting/fit deps
-bash third_party/fetch.sh        # clones CA-NAC + VaspBandUnfolding + Hefei-NAMD
+bash third_party/fetch.sh        # clones pinned CA-NAC/VBU + DEV/master Hefei engines
 ```
 
 **NAMD Launcher redistributes none of the scientific engines.** CA-NAC,
-VaspBandUnfolding and Hefei-NAMD are dependencies you install — `fetch.sh`
-clones them at pinned commits into `third_party/_src/` (git-ignored), or point
+VaspBandUnfolding and both Hefei-NAMD variants are dependencies you install —
+`fetch.sh` clones fixed commits into `third_party/_src/` (git-ignored), or point
 at your own installs with `nac.canac_dir` / `nac.vaspwfc_dir` / `namd.binary_dir`
 (or `$NAMDFORGE_CANAC_DIR` / `$NAMDFORGE_VASPWFC_DIR`). See
 [`third_party/README.md`](third_party/README.md).
@@ -120,3 +124,6 @@ synthetic pipeline is exercised end to end, but **no real multi-stage LONI
 campaign has been run through it yet**. Inspect every generated `inp`,
 `input.py`, and job script, and do a small `BMIN/BMAX` smoke run before
 committing an allocation.
+
+N²AMD commands are research-preview scoping aids only. Production campaigns
+must use `nac.engine: ca-nac`.

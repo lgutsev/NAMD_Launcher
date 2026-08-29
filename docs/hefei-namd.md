@@ -4,35 +4,42 @@
 > trajectory, every `SHPROP.*` file, is produced by Hefei-NAMD. Please cite the
 > Hefei-NAMD papers and repository and acknowledge Qijing Zheng, Jin Zhao and
 > the Hefei-NAMD group.
-> Repository: <https://github.com/QijingZheng/Hefei-NAMD>
+> Original repository: <https://github.com/QijingZheng/Hefei-NAMD>
+> N²AMD/DEV repository: <https://github.com/zhang-changwei/Hefei-NAMD-DEV>
 > Tutorials: <http://staff.ustc.edu.cn/~zqj/>
 
 ## Getting and building the engine
 
-NAMD Launcher ships **no** Hefei-NAMD code. `third_party/fetch.sh` clones it
-(pinned) into `third_party/_src/`; you build it:
+NAMD Launcher ships **no** Hefei-NAMD code. `third_party/fetch.sh` clones fixed
+commits of both the public DEV engine and the original master implementation
+into `third_party/_src/`; build the branch selected by the campaign:
 
 ```bash
 bash third_party/fetch.sh
-cd third_party/_src/Hefei-NAMD/src/dish && make      # DISH   -> ./dish
-cd ../namd && make                                   # FSSH   -> ./namd
+cd third_party/_src/Hefei-NAMD-DEV
+make -f linux/Makefile tdm                           # DEV DISH/FSSH -> ./hfnamd
+
+cd ../Hefei-NAMD/src/dish && make tdm                # master DISH -> ./dish
+cd ../namd && make tdm                               # master FSSH -> ./namd
 ```
 
-NAMD Launcher finds the binary via `namd.binary_dir` in the campaign, then
-`third_party/_src/Hefei-NAMD/src/{dish,namd}`, then `$PATH`. `inamd hefei
+NAMD Launcher finds the binary via `namd.binary_dir` in the campaign, then the
+matching pinned checkout under `third_party/_src/`, then `$PATH`. `inamd hefei
 audit` reports which; if none resolves, the `hefei_namd` job's own `command`
 (a full path is fine) still runs. You can also point that job's `command`
 straight at the binary.
 
 ### The DEV branch (`hfnamd`)
 
-The reference workflow uses the **Hefei-NAMD-DEV** branch, whose MPI binary is
-`hfnamd` and whose `&NAMDPARA` namelist takes `ALGO = "DISH" | "FSSH"`,
+The reference workflow and N²AMD paper use the public, MIT-licensed
+**Hefei-NAMD-DEV** repository, whose MPI binary is `hfnamd` and whose
+`&NAMDPARA` namelist takes `ALGO = "DISH" | "FSSH"`,
 `ALGO_INT`, `LSHP`, `LCPTXT`, `DEBUGLEVEL` (see `src/namd_launcher/templates/
-inp.dish`). If you have access to that branch, build it the same way and set
-`namd.branch: dev` (the default). Otherwise use `namd.branch: master` and the
-upstream `dish` / `namd` binaries — NAMD Launcher renders the correct namelist
-for either.
+inp.dish`). Set `namd.branch: dev` (the default). The original master
+repository remains supported through `namd.branch: master`; the launcher
+renders its older namelist and selects `dish` or `namd`. Leave the profile's
+`hefei_namd.command` unset to preserve automatic selection; a configured
+command is an intentional site-specific override.
 
 ## Inputs NAMD Launcher prepares
 
@@ -45,8 +52,9 @@ for either.
 | `inp` | `inamd hefei prepare` | `&NAMDPARA` namelist |
 
 `inamd hefei prepare` refuses to proceed unless `BMAX-BMIN+1` is consistent
-across `inp`, `DEPHTIME`, `NATXT` and `EIGTXT`, and `NSW ≤` the number of NAC
-frames.
+across `inp`, `DEPHTIME`, `NATXT` and `EIGTXT`, `NSW ≤` the number of NAC
+frames, and every `INICON` band and start time is valid for the requested
+algorithm.
 
 ## Parameter notes (from the reference workflow)
 

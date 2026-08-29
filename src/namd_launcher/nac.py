@@ -71,7 +71,7 @@ def render_input_py(campaign: Campaign) -> str:
 
 def prepare_nac(campaign: Campaign, *, dry_run: bool = False, force: bool = False) -> dict[str, Any]:
     if campaign.nac["engine"] != "ca-nac":
-        raise SafetyError(f"nac.engine is {campaign.nac['engine']!r}; `inamd nac` handles ca-nac (see `inamd n2amd`).")
+        raise SafetyError(f"nac.engine is {campaign.nac['engine']!r}; the supported production engine is ca-nac.")
     snap_root = campaign.stage_dir("snapshots")
     nac_root = campaign.stage_dir(STAGE)
     if not (snap_root / "snapshots_manifest.json").is_file():

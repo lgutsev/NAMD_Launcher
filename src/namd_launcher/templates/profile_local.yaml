@@ -4,5 +4,5 @@ scheduler: local
 jobs:
   vasp_nac:   {command: vasp_gam}
   canac:      {command: python input.py}
-  hefei_namd: {command: hfnamd}
+  hefei_namd: {}             # branch/algo select hfnamd, dish, or namd
   analysis:   {command: bash run_analysis.sh}

@@ -1,7 +1,7 @@
 # ============================================================
 # WAVECAR / eigenvalue SCF for one NAMD snapshot
 # One non-self-consistent-geometry single point per XDATCAR frame.
-# CA-NAC (or N2AMD) reads the WAVECAR + PROCAR/EIGENVAL from each folder.
+# CA-NAC reads the WAVECAR + PROCAR/EIGENVAL from each folder.
 # ============================================================
 
 SYSTEM = namd_snapshot

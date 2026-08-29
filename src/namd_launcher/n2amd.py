@@ -1,12 +1,13 @@
-"""Step 3 (experimental) -- N2AMD: a deep-Hamiltonian shortcut for the NAC stage.
+"""Research preview -- N2AMD: a possible deep-Hamiltonian NAC pathway.
 
 N2AMD (Zhang et al., Nat. Commun. 2025 / arXiv:2408.06654) trains an
 E(3)-equivariant deep Hamiltonian (HamGNN) on DFT Hamiltonians, then predicts
 H(t) along an AIMD trajectory, diagonalises it for eigenvalues, and computes
 NACs -- feeding Hefei-NAMD through the classical-path approximation exactly
-like CA-NAC does. In this launcher it would **replace stages `waverun` + `nac`**:
-same Step2 `XDATCAR` in, ``EIGTXT`` / ``NATXT`` out for the unchanged `hefei`
-stage.
+like CA-NAC does. It is deliberately outside the supported production DAG. A
+future integration would replace the VASP snapshot SCFs while reusing CA-NAC's
+``HAMGNNHUGE`` backend to preserve phase, overlap, and Hefei-NAMD normalization
+conventions.
 
 Nothing here trains or runs a model. ``status`` probes dependencies, ``plan``
 prints the workflow, and ``export`` writes a frame manifest + a training-data
@@ -32,59 +33,63 @@ WORKFLOW = [
     {
         "step": 1,
         "name": "training set",
-        "detail": "500-2000 small-supercell DFT Hamiltonians (ideally HSE06) for the target chemistry. "
-        "VASP does not emit an LCAO Hamiltonian: generate with openmx / ABACUS / HONPAS, or the "
-        "N2AMD-provided pipeline. This is the main cost and the main integration gap.",
-        "artifact": "n2amd/train/*.h5 (HamGNN format)",
+        "detail": "System-specific NAO Hamiltonians from OpenMX, ABACUS, or SIESTA/HONPAS. Published "
+        "demonstrations used 300-2000 structures; that is evidence, not a universal requirement. VASP "
+        "geometries may be reused, but VASP does not directly emit HamGNN-compatible NAO labels.",
+        "artifact": "n2amd/train/graph_data.npz or LMDB (HamGNN format)",
     },
     {
         "step": 2,
         "name": "train HamGNN",
-        "detail": "E(3)-equivariant deep Hamiltonian. github.com/QuantumLab-ZY/HamGNN. GPU.",
+        "detail": "E(3)-equivariant deep Hamiltonian. github.com/QuantumLab-ZY/HamGNN. "
+        "GPU training is practical; prediction can also run on CPU.",
         "artifact": "n2amd/model/hamgnn.ckpt",
     },
     {
         "step": 3,
         "name": "predict H(t)",
-        "detail": "Apply the model to every frame of the Step2 XDATCAR (larger cells / longer "
-        "trajectories than the training supercell are the point).",
+        "detail": "Prepare HamGNN graph inputs, including the NAO overlap/H0 preprocessing required by the "
+        "selected LCAO backend, then predict each retained geometry.",
         "artifact": "n2amd/pred/H_*.npy",
     },
     {
         "step": 4,
-        "name": "eigen-decompose + NAC",
-        "detail": "Diagonalise H(t); finite-difference wavefunction overlaps -> NAC. "
-        "N2AMD codes (Figshare) do this and interface to Hefei-NAMD.",
-        "artifact": "nac/EIGTXT, nac/NATXT (same names the `hefei` stage consumes)",
+        "name": "CA-NAC HamGNN adapter",
+        "detail": "Diagonalise H(t), write per-frame eigen/wfc/overlap arrays, and run CA-NAC with "
+        "software='HAMGNNHUGE'. Do not write differentiated NAC values directly to NATXT: Hefei-NAMD "
+        "expects CA-NAC's antisymmetrized overlap numerator and applies its own 1/(2*POTIM) scaling.",
+        "artifact": "nac/EIGTXT, nac/NATXT via CA-NAC",
     },
     {
         "step": 5,
         "name": "hand off",
-        "detail": "Run `inamd dephase` / `inamd inicon` / `inamd hefei` on the generated "
-        "EIGTXT/NATXT exactly as for the CA-NAC path.",
+        "detail": "Only after direct parity checks confirm units, phase/state continuity, overlap convention, "
+        "NAC normalization, and band ordering should the generated files enter the conventional downstream path.",
         "artifact": "SHPROP.* -> `inamd shprop`",
     },
 ]
 
 
 def status() -> dict[str, Any]:
-    probes = {name: find_spec(name) is not None for name in ("torch", "e3nn", "pytorch_lightning", "HamGNN")}
+    probes = {name: find_spec(name) is not None for name in ("torch", "e3nn", "pytorch_lightning", "hamgnn")}
     return {
         "stage": STAGE,
         "implemented": False,
-        "note": "EXPERIMENTAL scaffold. N2AMD is not wired into the pipeline yet; see docs/n2amd.md.",
+        "support_level": "research-preview",
+        "note": "RESEARCH PREVIEW only. N2AMD is not part of the supported pipeline; see docs/n2amd.md.",
         "dependencies_present": probes,
         "references": {
             "paper": "Zhang et al., Nat. Commun. 16 (2025); arXiv:2408.06654",
             "hamgnn": "https://github.com/QuantumLab-ZY/HamGNN",
             "n2amd_code": "Figshare (linked from the paper)",
         },
-        "replaces_stages": ["waverun", "nac"],
+        "possible_future_replacement": ["waverun"],
+        "recommended_adapter": "CA-NAC software='HAMGNNHUGE'",
     }
 
 
 def plan(campaign: Campaign | None) -> dict[str, Any]:
-    payload = {"stage": STAGE, "implemented": False, "workflow": WORKFLOW}
+    payload = {"stage": STAGE, "implemented": False, "support_level": "research-preview", "workflow": WORKFLOW}
     if campaign is not None:
         payload["source_trajectory"] = campaign.source["trajectory"]
         payload["band_window"] = {k: campaign.bands.get(k) for k in ("vbm", "cbm", "nbands")}
@@ -111,6 +116,7 @@ def export(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
         "format": "namdforge-n2amd-frames",
         "schema_version": 1,
         "implemented": False,
+        "support_level": "research-preview",
         "source": src["label"],
         "trajectory_frames": len(traj),
         "n_ions": traj.n_ions,
@@ -126,7 +132,8 @@ def export(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
     window = f"VBM {bands.get('vbm')}, CBM {bands.get('cbm')}, NBANDS {bands.get('nbands')}"
     checklist = f"""# N2AMD training-data checklist for {campaign.name}
 
-> EXPERIMENTAL. This checklist scopes the work; nothing is trained or run here.
+> RESEARCH PREVIEW. This checklist scopes a separate research project; nothing
+> is trained or run here, and the production pipeline remains VASP + CA-NAC.
 
 ## Target
 - chemistry / structure: {src['label']}
@@ -134,21 +141,24 @@ def export(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
 - trajectory frames available: {len(traj)} (use last {nsw} for NAMD)
 
 ## To collect
-- [ ] 500-2000 DFT Hamiltonians on a small supercell of this chemistry
-      (openmx / ABACUS / HONPAS -- VASP cannot export the LCAO H).
-- [ ] functional decision: PBE (cheap, matches current CA-NAC path) vs HSE06
-      (the reason to use N2AMD; ~10-50x costlier per reference).
+- [ ] Converged NAO Hamiltonian training data for this chemistry
+      (OpenMX / ABACUS / SIESTA-HONPAS; published examples used 300-2000
+      structures, but determine sufficiency from held-out validation).
+- [ ] functional decision: PBE may still benefit large/long/repeated studies;
+      HSE06 is an important motivation, not the only one.
+- [ ] for Pb/I perovskites, decide and validate SOC treatment explicitly.
 - [ ] sampling: decorrelated frames from a short AIMD at the target T, plus
       strained / defected configs for transferability.
 - [ ] hold-out set for eigenvalue + NAC parity vs direct DFT.
 
 ## To install
 - [ ] HamGNN (https://github.com/QuantumLab-ZY/HamGNN) + torch + e3nn (GPU).
-- [ ] N2AMD codes (Figshare, linked from the paper) for the H(t) -> NAC step.
+- [ ] N2AMD tutorial code plus CA-NAC's HAMGNNHUGE adapter for the H(t) -> NAC step.
 
 ## Hand-off
-Once `nac/EIGTXT` and `nac/NATXT` exist, `inamd dephase`, `inamd inicon`,
-`inamd hefei` and `inamd shprop` run unchanged.
+Only after a direct parity test confirms energy units, phase/state continuity,
+overlap convention, NAC normalization, and band ordering should generated
+`EIGTXT`/`NATXT` enter `inamd dephase` and Hefei-NAMD.
 """
     checklist_path.write_text(checklist, encoding="utf-8")
     StateStore(campaign.root).event("n2amd.export", frames=len(traj), nsw=nsw)
@@ -181,7 +191,7 @@ def _cmd(args: argparse.Namespace) -> int:
 
 @register
 def _register(commands: Any, add_campaign_option: Any) -> None:
-    parser = commands.add_parser(STAGE, help="(experimental) deep-Hamiltonian NAC shortcut -- feasibility only")
+    parser = commands.add_parser(STAGE, help="research preview: scope a possible deep-Hamiltonian NAC pathway")
     sub = parser.add_subparsers(dest="n2amd_command", required=True)
     st = sub.add_parser("status", help="Probe dependencies; report implementation state")
     st.set_defaults(func=_cmd)

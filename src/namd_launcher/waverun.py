@@ -49,11 +49,13 @@ def _loop_command(root: Path, first: str, last: str, digits: int, vasp_command: 
             f'ROOT="{root.as_posix()}"',
             f'for i in $(seq -f "%0{digits}g" {int(first)} {int(last)}); do',
             '  cd "$ROOT/$i" || { echo "missing snapshot $i"; continue; }',
-            "  if [ -s OUTCAR ] && grep -q 'reached required accuracy' OUTCAR; then",
+            "  if [ -s WAVECAR ] && [ -s OUTCAR ] && "
+            "(grep -q 'reached required accuracy' OUTCAR || grep -q 'General timing and accounting' OUTCAR); then",
             '    echo "snapshot $i already converged, skipping"; cd "$ROOT"; continue',
             "  fi",
             f"  {vasp_command}",
-            "  if grep -q 'reached required accuracy' OUTCAR 2>/dev/null; then",
+            "  if grep -q 'reached required accuracy' OUTCAR 2>/dev/null || "
+            "grep -q 'General timing and accounting' OUTCAR 2>/dev/null; then",
             '    echo "snapshot $i OK"',
             "  else",
             '    echo "snapshot $i CHECK"',
@@ -70,8 +72,13 @@ def _array_command(root: Path, digits: int, vasp_command: str) -> str:
             f'ROOT="{root.as_posix()}"',
             f'i=$(printf "%0{digits}d" "${{SLURM_ARRAY_TASK_ID:?set --array}}")',
             'cd "$ROOT/$i" || { echo "missing snapshot $i"; exit 1; }',
+            "if [ -s WAVECAR ] && [ -s OUTCAR ] && "
+            "(grep -q 'reached required accuracy' OUTCAR || grep -q 'General timing and accounting' OUTCAR); then",
+            '  echo "snapshot $i already complete, skipping"; exit 0',
+            "fi",
             f"{vasp_command}",
-            "if grep -q 'reached required accuracy' OUTCAR 2>/dev/null; then",
+            "if grep -q 'reached required accuracy' OUTCAR 2>/dev/null || "
+            "grep -q 'General timing and accounting' OUTCAR 2>/dev/null; then",
             '  echo "snapshot $i OK"',
             "else",
             '  echo "snapshot $i CHECK"',

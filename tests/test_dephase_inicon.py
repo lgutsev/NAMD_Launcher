@@ -69,7 +69,7 @@ def test_inicon_deterministic(campaign_dir: Path) -> None:
     rows_2 = (campaign_dir / "nac" / "INICON").read_text(encoding="utf-8")
     assert rows_1 == rows_2
     lines = rows_1.strip().splitlines()
-    assert len(lines) == 5  # nsample from conftest
+    assert len(lines) == campaign.inicon["nsample"]
     for line in lines:
         t, b = map(int, line.split())
         assert 1 <= t <= 3

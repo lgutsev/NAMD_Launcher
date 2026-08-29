@@ -34,3 +34,45 @@ references:
     year: 2021
     volume: 12
     start: 3082
+    doi: "10.1021/acs.jpclett.0c03853"
+  - type: software
+    title: "Hefei-NAMD-DEV"
+    authors:
+      - family-names: Zhang
+        given-names: Changwei
+      - family-names: Chu
+        given-names: Weibin
+    repository-code: "https://github.com/zhang-changwei/Hefei-NAMD-DEV"
+    doi: "10.5281/zenodo.14671441"
+    notes: "Unified hfnamd engine used by the N2AMD workflow."
+  - type: article
+    title: >-
+      Advancing nonadiabatic molecular dynamics simulations in solids with
+      E(3) equivariant deep neural Hamiltonians
+    authors:
+      - family-names: Zhang
+        given-names: Changwei
+      - family-names: Zhong
+        given-names: Yang
+      - family-names: Tao
+        given-names: Zhi-Guo
+      - family-names: Qin
+        given-names: Xinming
+      - family-names: Shang
+        given-names: Honghui
+      - family-names: Lan
+        given-names: Zhenggang
+      - family-names: Prezhdo
+        given-names: Oleg V.
+      - family-names: Gong
+        given-names: Xin-Gao
+      - family-names: Chu
+        given-names: Weibin
+      - family-names: Xiang
+        given-names: Hongjun
+    journal: "Nature Communications"
+    year: 2025
+    volume: 16
+    start: 2033
+    doi: "10.1038/s41467-025-57328-1"
+    notes: "Research-preview pathway only; not part of NAMD Launcher's supported production DAG."

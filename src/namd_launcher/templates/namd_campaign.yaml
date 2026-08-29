@@ -56,7 +56,7 @@ bands:
 # (bash third_party/fetch.sh), then whatever is importable in the `canac` job.
 # ---------------------------------------------------------------------------
 nac:
-  engine: ca-nac             # ca-nac | n2amd (experimental)
+  engine: ca-nac             # supported production engine
   bmin: 744
   bmax: 745
   bmin_stored: 734
@@ -79,10 +79,10 @@ dephasing:
   dt_fs: 1.0
 
 inicon:
-  nsample: 100
+  nsample: 10                # must equal namd.nsample
   tmax: 400
   band_min: 745
-  band_max: 750
+  band_max: 745              # must remain inside namd.[bmin, bmax]
   seed: 20260829
 
 # ---------------------------------------------------------------------------

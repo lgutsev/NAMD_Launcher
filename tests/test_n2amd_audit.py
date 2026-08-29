@@ -15,8 +15,11 @@ from ._helpers import make_xdatcar
 def test_n2amd_status_reports_not_implemented() -> None:
     s = status()
     assert s["implemented"] is False
-    assert s["replaces_stages"] == ["waverun", "nac"]
+    assert s["support_level"] == "research-preview"
+    assert s["possible_future_replacement"] == ["waverun"]
+    assert s["recommended_adapter"] == "CA-NAC software='HAMGNNHUGE'"
     assert "torch" in s["dependencies_present"]
+    assert "hamgnn" in s["dependencies_present"]
 
 
 def test_n2amd_plan_with_campaign(campaign_dir: Path) -> None:
@@ -33,6 +36,9 @@ def test_n2amd_export_writes_manifest_and_checklist(campaign_dir: Path) -> None:
     assert result["implemented"] is False
     assert (campaign_dir / "n2amd" / "frames_manifest.json").is_file()
     assert (campaign_dir / "n2amd" / "TRAINING_CHECKLIST.md").is_file()
+    checklist = (campaign_dir / "n2amd" / "TRAINING_CHECKLIST.md").read_text(encoding="utf-8")
+    assert "RESEARCH PREVIEW" in checklist
+    assert "HAMGNNHUGE" in checklist
 
 
 def test_campaign_audit_all_pending(campaign_dir: Path) -> None:

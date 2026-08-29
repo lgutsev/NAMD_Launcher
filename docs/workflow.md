@@ -105,9 +105,10 @@ count.
     the source workflow.
   - `namd.branch: master` → explicit `&NAMDPARA` with `LDISH`+`DIINIT` (DISH,
     binary `dish`) or `LSHP` (FSSH, binary `namd`); needs `NBANDS`.
-  - Cross-checks `nbasis = BMAX-BMIN+1` against `DEPHTIME` dimensions,
-    `NATXT`/`EIGTXT` column counts, `NSW ≤ NAC frames`, `NSAMPLE ≤ INICON rows`
-    — and **refuses** to prepare if any fails.
+  - Cross-checks `nbasis = BMAX-BMIN+1` against complete `DEPHTIME`, `NATXT`,
+    and `EIGTXT` table shapes; requires `NSW ≤ NAC frames`, exactly `NSAMPLE`
+    valid `INICON` rows, active-window band indices, and algorithm-safe start
+    times — and **refuses** to prepare if any fails.
   - Stages `NATXT`, `EIGTXT`, `INICON` (+ `DEPHTIME` for DISH) into `namd/`.
 - `launch` renders `namd/run_namd.sh` from the `hefei_namd` job and submits.
 
