@@ -1,0 +1,110 @@
+schema_version: 1
+
+project:
+  name: example-namd
+  description: Non-adiabatic dynamics for a passivated perovskite slab
+
+profile: profiles/loni.yaml
+
+# ---------------------------------------------------------------------------
+# Source AIMD trajectory. Either:
+#   * a path to an XDATCAR_FINAL file, or
+#   * an InterfaceForge Step2 run directory (its XDATCAR + KPOINTS + POTCAR +
+#     launcher are read directly -- `iface vasp step2-prepare` output).
+# ---------------------------------------------------------------------------
+source:
+  trajectory: ../MD/Step2_300K/run1
+  structure: CONTCAR          # used only when `trajectory` is a directory
+
+# ---------------------------------------------------------------------------
+# Stage 1 -- snapshot folders (FolderPrep + create_links)
+# ---------------------------------------------------------------------------
+snapshots:
+  nsw: 500                    # keep the last NSW frames as folders 001..NSW
+  stride: 1
+  potim: 1.0                  # fs between retained snapshots
+  digits: 3
+  link_inputs: [INCAR, KPOINTS, POTCAR]
+  incar: templates/INCAR.nac  # WAVECAR/eigenvalue SCF; omit to reuse an INCAR in root
+
+# ---------------------------------------------------------------------------
+# Band window (VASP indices, 1-based). Atom groups feed `inamd ksplot`.
+#
+# NBANDS for the snapshot SCF: leave `nbands` unset to inherit it from the
+# reference MD run's OUTCAR/INCAR (what the trajectory was actually run with),
+# raised if needed to cover CA-NAC's `nac.bmax_stored` window + `nbands_margin`.
+# Set `nbands` explicitly to override; `inamd snapshots prepare --dry-run`
+# reports the decision.
+# ---------------------------------------------------------------------------
+bands:
+  vbm: 744
+  cbm: 745
+  # nbands: 960          # optional explicit override
+  nbands_margin: 64      # bands kept above bmax_stored when auto-sizing
+  nbands_round: 8        # round the auto-chosen value up to a multiple of this
+  groups:
+    Iodine: [177, 257]
+    Lead: [311, 337]
+    Passivant: [[165, 176], [27, 34], 310]
+
+# ---------------------------------------------------------------------------
+# Stage 4 -- non-adiabatic couplings
+# ---------------------------------------------------------------------------
+nac:
+  engine: ca-nac             # ca-nac | n2amd (experimental)
+  bmin: 744
+  bmax: 745
+  bmin_stored: 734
+  bmax_stored: 755
+  gamma: true                # vasp_gam
+  ispin: 1
+  ikpt: 1
+  nproc: 48
+  is_real: true
+  iformat: HFNAMD
+
+# ---------------------------------------------------------------------------
+# Stage 5 -- dephasing sanity band (perovskites: a few fs; << 20)
+# ---------------------------------------------------------------------------
+dephasing:
+  expect_min_fs: 2.0
+  expect_max_fs: 20.0
+  dt_fs: 1.0
+
+inicon:
+  nsample: 100
+  tmax: 400
+  band_min: 745
+  band_max: 750
+  seed: 20260829
+
+# ---------------------------------------------------------------------------
+# Stage 6 -- Hefei-NAMD surface hopping
+# ---------------------------------------------------------------------------
+namd:
+  branch: dev                # dev (hfnamd) | master (namd/dish)
+  algo: DISH                 # DISH | FSSH
+  bmin: 744
+  bmax: 745
+  nsw: 498
+  nsample: 10
+  ntraj: 1000
+  nelm: 10
+  namdtime: 10000000
+  potim: 1.0
+  temp: 300
+  algo_int: 0
+  lhole: false
+  lshp: true
+  lcptxt: true
+  debuglevel: "I"
+
+# ---------------------------------------------------------------------------
+# Stage 7 -- SHPROP averaging + exponential fit
+# ---------------------------------------------------------------------------
+analysis:
+  shprop_column: 4           # column averaged across SHPROP.* (target-state population)
+  time_in: fs                # units of SHPROP column 1
+  fit_time_unit: ns          # x-axis unit for exp(-t/A)
+  model: single_exp
+  normalize: true

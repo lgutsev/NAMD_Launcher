@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+title: "NAMD Launcher (namdforge)"
+message: >-
+  NAMD Launcher is an orchestration layer only. If it contributes to published
+  work, please also cite Hefei-NAMD and CA-NAC (see README "Acknowledgements").
+type: software
+authors:
+  - family-names: Gutsev
+    given-names: Lavrenty G.
+repository-code: "https://github.com/lgutsev/NAMD_Launcher"
+license: MIT
+version: 0.1.0
+date-released: 2026-08-29
+references:
+  - type: software
+    title: "Hefei-NAMD"
+    authors:
+      - family-names: Zheng
+        given-names: Qijing
+      - family-names: Zhao
+        given-names: Jin
+    repository-code: "https://github.com/QijingZheng/Hefei-NAMD"
+    notes: "All non-adiabatic dynamics in this workflow is performed by Hefei-NAMD."
+  - type: article
+    title: >-
+      Concentric Approximation for Fast and Accurate Numerical Evaluation of
+      Nonadiabatic Coupling with Projector Augmented-Wave Pseudopotentials
+    authors:
+      - family-names: Chu
+        given-names: Weibin
+      - family-names: Prezhdo
+        given-names: Oleg V.
+    journal: "The Journal of Physical Chemistry Letters"
+    year: 2021
+    volume: 12
+    start: 3082

@@ -1,0 +1,33 @@
+# ============================================================
+# WAVECAR / eigenvalue SCF for one NAMD snapshot
+# One non-self-consistent-geometry single point per XDATCAR frame.
+# CA-NAC (or N2AMD) reads the WAVECAR + PROCAR/EIGENVAL from each folder.
+# ============================================================
+
+SYSTEM = namd_snapshot
+
+ICHARG = 2
+GGA    = PE
+
+# ---- electronic structure ----
+ISMEAR = 0
+SIGMA  = 0.05
+ENCUT  = 400
+LREAL  = AUTO
+PREC   = Normal
+NELM   = 120
+# EDIFF  = 1E-6          # tighten for production NAC
+
+# ---- output needed downstream ----
+LWAVE  = .TRUE.          # CA-NAC time-overlap needs the WAVECAR
+LORBIT = 11              # PROCAR for tdksen / spatial localisation
+NSW    = 0
+# NBANDS is set by `inamd snapshots prepare` from the reference MD run
+# (raised to cover nac.bmax_stored + bands.nbands_margin). Any value here is
+# overwritten unless you set bands.nbands in the campaign.
+
+# ---- parallelisation (edit per machine) ----
+NPAR   = 8
+# KPAR = 1
+
+# Single Gamma point: use the Gamma-only VASP build (vasp_gam).

@@ -1,0 +1,8 @@
+name: local
+scheduler: local
+# Runs commands directly (no sbatch). Useful for a workstation or a smoke test.
+jobs:
+  vasp_nac:   {command: vasp_gam}
+  canac:      {command: python input.py}
+  hefei_namd: {command: hfnamd}
+  analysis:   {command: bash run_analysis.sh}

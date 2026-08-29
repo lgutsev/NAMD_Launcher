@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.DS_Store
+*.swp
+.idea/
+
+# Runtime state written by the launcher
+.namdforge/
+
+# Fetched third-party sources (see third_party/fetch.sh)
+third_party/_src/
+
+# Scientific outputs that should not be committed
+*.npy
+*.npy.*
+WAVECAR
+CHG
+CHGCAR

@@ -1,0 +1,75 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "namdforge"
+version = "0.1.0"
+description = "CLI orchestration layer for the VASP -> CA-NAC -> Hefei-NAMD non-adiabatic dynamics workflow"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+  {name = "Lavrenty G. Gutsev"},
+]
+keywords = [
+  "materials-science",
+  "VASP",
+  "nonadiabatic-molecular-dynamics",
+  "NAMD",
+  "Hefei-NAMD",
+  "CA-NAC",
+  "surface-hopping",
+  "perovskites",
+  "Slurm",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Chemistry",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+  "numpy>=1.24",
+  "PyYAML>=6",
+]
+
+[project.optional-dependencies]
+vasp = ["ase>=3.23"]
+report = ["matplotlib>=3.7", "scipy>=1.10"]
+interfaceforge = ["interfaceforge"]
+dev = ["ase>=3.23", "scipy>=1.10", "matplotlib>=3.7", "pytest>=8", "ruff>=0.6"]
+all = [
+  "ase>=3.23",
+  "scipy>=1.10",
+  "matplotlib>=3.7",
+]
+
+[project.scripts]
+inamd = "namd_launcher.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/lgutsev/NAMD_Launcher"
+Repository = "https://github.com/lgutsev/NAMD_Launcher"
+Issues = "https://github.com/lgutsev/NAMD_Launcher/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+namd_launcher = ["templates/*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# On a locked-down Windows temp dir, pass --basetemp=<writable dir>.

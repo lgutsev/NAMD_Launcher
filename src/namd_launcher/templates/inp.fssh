@@ -1,0 +1,20 @@
+&NAMDPARA
+  BMIN       = @BMIN@
+  BMAX       = @BMAX@
+
+  NSAMPLE    = @NSAMPLE@
+  NTRAJ      = @NTRAJ@
+  NSW        = @NSW@
+  NELM       = @NELM@
+
+  TEMP       = @TEMP@
+  NAMDTIME   = @NAMDTIME@
+  POTIM      = @POTIM@
+
+  ALGO       = "FSSH"
+  ALGO_INT   = @ALGO_INT@
+  LHOLE      = @LHOLE@
+  LSHP       = @LSHP@
+  LCPTXT     = @LCPTXT@
+  DEBUGLEVEL = "@DEBUGLEVEL@"
+/
