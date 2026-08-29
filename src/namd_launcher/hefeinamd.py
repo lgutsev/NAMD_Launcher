@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from ._compat import render_job, write_job
+from ._deps import resolve_hefei_binary
 from ._run import submit
 from ._stage import rollup_status, write_audit, write_manifest
 from ._template import fortran_bool, render
@@ -201,8 +202,10 @@ def launch_hefei(campaign: Campaign, *, execute: bool = False) -> dict[str, Any]
     if "hefei_namd" not in profile["jobs"]:
         raise SafetyError("Scheduler profile has no 'hefei_namd' job")
     _, meta = render_inp(campaign)
+    resolved = resolve_hefei_binary(meta["binary"], campaign.namd)
     default_command = str(profile["jobs"]["hefei_namd"].get("command", "")).strip()
-    command = default_command or f"mpirun -np {{ntasks}} {meta['binary']}"
+    exe = resolved["path"] if (resolved["found"] and resolved["how"] != "PATH") else meta["binary"]
+    command = default_command or f"mpirun -np {{ntasks}} {exe}"
     script = render_job(
         profile, "hefei_namd", command=command,
         job_name=f"{campaign.name}_namd", working_directory=namd_root.as_posix(),
@@ -214,7 +217,7 @@ def launch_hefei(campaign: Campaign, *, execute: bool = False) -> dict[str, Any]
     StateStore(campaign.root).event("hefei.launch", execute=execute, binary=meta["binary"], **logged)
     return {
         "mode": "submitted" if execute else "dry-run",
-        "binary": meta["binary"],
+        "binary": resolved,
         "script": str(script_path),
         **outcome,
     }
@@ -255,16 +258,20 @@ def audit_hefei(campaign: Campaign) -> dict[str, Any]:
             }
         )
 
+    binary = resolve_hefei_binary(meta["binary"], campaign.namd)
     status = rollup_status([r["status"] for r in rows]) if rows else "PENDING"
+    summary = f"{sum(r['status'] == 'PASS' for r in rows)}/{len(rows)} checks pass; {len(shprop)} SHPROP files"
+    if not binary["found"]:
+        summary += f"  (note: {meta['binary']} not found -- {binary['hint']})"
     audit = {
         "status": status,
         "root": str(namd_root),
         "branch": meta["branch"],
         "algo": meta["algo"],
-        "binary": meta["binary"],
+        "binary_install": binary,
         "shprop_files": len(shprop),
         "runs": rows,
-        "summary": f"{sum(r['status'] == 'PASS' for r in rows)}/{len(rows)} checks pass; {len(shprop)} SHPROP files",
+        "summary": summary,
     }
     write_audit(namd_root, STAGE, audit, rows=rows)
     return audit

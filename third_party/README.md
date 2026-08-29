@@ -1,30 +1,33 @@
 # third_party/
 
-Scientific code that NAMD Launcher *orchestrates* rather than reimplements.
-It is **not** covered by the repository's MIT license; each subdirectory keeps
-its own authors and terms (`PROVENANCE.md`, `LICENSES.md`).
+NAMD Launcher **orchestrates** three external scientific codes; it does **not
+redistribute any of them**. This directory holds only pointers + a fetch
+script. `third_party/_src/` (git-ignored) is where `fetch.sh` clones them.
 
-| directory | upstream | role in the workflow |
-|---|---|---|
-| `ca_nac/` | [WeibinChu/CA-NAC](https://github.com/WeibinChu/CA-NAC) | Non-adiabatic couplings + eigenvalues from snapshot WAVECARs (stage `nac`). |
-| `hefei_namd_scripts/` | [QijingZheng/Hefei-NAMD](https://github.com/QijingZheng/Hefei-NAMD) `scripts/` + this project's own copies | `Dephase.py` (DEPHTIME), `tdksen*.py` / `bandgap_stats.py` (KS-manifold plots). |
-| `_src/` (git-ignored) | fetched by `fetch.sh` | Hefei-NAMD (Fortran; compiled on the cluster) and VaspBandUnfolding (import dependency of CA-NAC). |
+| code | upstream | role | how NAMD Launcher finds it |
+|---|---|---|---|
+| **CA-NAC** | [WeibinChu/CA-NAC](https://github.com/WeibinChu/CA-NAC) | non-adiabatic couplings + eigenvalues (`inamd nac`) | `nac.canac_dir` → `$NAMDFORGE_CANAC_DIR` → `_src/CA-NAC` → importable `CAnac` |
+| **VaspBandUnfolding** | [QijingZheng/VaspBandUnfolding](https://github.com/QijingZheng/VaspBandUnfolding) | `vaspwfc` / `paw` / `spinorb`, imported by CA-NAC | `nac.vaspwfc_dir` → `$NAMDFORGE_VASPWFC_DIR` → `_src/VaspBandUnfolding` → importable |
+| **Hefei-NAMD** | [QijingZheng/Hefei-NAMD](https://github.com/QijingZheng/Hefei-NAMD) | the surface-hopping engine (`inamd hefei`) | `namd.binary_dir` → `_src/Hefei-NAMD/src/{dish,namd}` → `hfnamd`/`dish`/`namd` on `$PATH` |
 
-## Getting the compiled/importable dependencies
+## Setup
 
 ```bash
-bash third_party/fetch.sh          # clones Hefei-NAMD + VaspBandUnfolding into third_party/_src/
+bash third_party/fetch.sh                       # clone all three (pinned commits)
+cd third_party/_src/Hefei-NAMD/src/dish && make # build the engine
+pip install ase scipy numpy                     # CA-NAC's Python deps
 ```
 
-Then build Hefei-NAMD (`cd third_party/_src/Hefei-NAMD/src/dish && make`) and put
-`vaspwfc.py` / `paw.py` / `spinorb.py` from VaspBandUnfolding on `PYTHONPATH`
-for the `nac` stage. See `docs/hefei-namd.md` and `docs/ca-nac.md`.
+Or skip `fetch.sh` entirely and point at your existing installs via the
+campaign keys / environment variables above. The compute-side `canac` /
+`hefei_namd` scheduler jobs can also set things up in their `preamble`
+(`CANAC_ACTIVATE_SCRIPT` is wired in the LONI profile template).
 
-## Why some things are fetched, not committed
+## Why nothing is committed here
 
-Hefei-NAMD and VaspBandUnfolding do not carry an explicit open-source license
-file. Rather than redistribute them here, `fetch.sh` pins the exact commits so
-the workflow stays reproducible. CA-NAC's Python driver and the Hefei-NAMD
-helper scripts *are* committed (with attribution) because the launcher renders
-their configuration and needs them present to be useful offline; if you would
-prefer they were fetched too, delete the directories and extend `fetch.sh`.
+CA-NAC and Hefei-NAMD do not ship an explicit open-source license, and CA-NAC
+pulls in `mod_hungarian.py` (GPL-2.0+, from Libra). Rather than redistribute
+any of it, `fetch.sh` pins exact commits so a study stays reproducible.
+`inamd nac prepare` / `inamd hefei audit` report which install was resolved and
+how; a missing dependency becomes an error at `inamd nac run` /
+`inamd hefei launch` (use `--allow-missing` if the compute node provides it).

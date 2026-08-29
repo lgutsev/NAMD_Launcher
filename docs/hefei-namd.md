@@ -9,7 +9,8 @@
 
 ## Getting and building the engine
 
-`third_party/fetch.sh` clones Hefei-NAMD (pinned) into `third_party/_src/`.
+NAMD Launcher ships **no** Hefei-NAMD code. `third_party/fetch.sh` clones it
+(pinned) into `third_party/_src/`; you build it:
 
 ```bash
 bash third_party/fetch.sh
@@ -17,8 +18,11 @@ cd third_party/_src/Hefei-NAMD/src/dish && make      # DISH   -> ./dish
 cd ../namd && make                                   # FSSH   -> ./namd
 ```
 
-Put the resulting binary on `PATH` (or point the `hefei_namd` profile job's
-`command` at its full path).
+NAMD Launcher finds the binary via `namd.binary_dir` in the campaign, then
+`third_party/_src/Hefei-NAMD/src/{dish,namd}`, then `$PATH`. `inamd hefei
+audit` reports which; if none resolves, the `hefei_namd` job's own `command`
+(a full path is fine) still runs. You can also point that job's `command`
+straight at the binary.
 
 ### The DEV branch (`hfnamd`)
 

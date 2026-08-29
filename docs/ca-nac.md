@@ -13,22 +13,38 @@ CA-NAC is used here (rather than Hefei-NAMD's own serial NAC) because it
 parallelises the WAVECAR time-overlap step and produces a standard input that
 is compatible with both Hefei-NAMD and PYXAID.
 
-## Dependencies
+## Dependencies (installed, not vendored)
+
+NAMD Launcher ships **no** CA-NAC code. Get it once:
 
 ```bash
+bash third_party/fetch.sh          # clones CA-NAC + VaspBandUnfolding into third_party/_src/
 pip install ase scipy numpy
-bash third_party/fetch.sh
-export PYTHONPATH="$PWD/third_party/_src/VaspBandUnfolding:$PYTHONPATH"   # vaspwfc, paw, spinorb
 ```
 
-`third_party/ca_nac/` holds `CAnac.py`, `aeolap.py`, `mod_hungarian.py` (see
-`PROVENANCE.md` / `LICENSES.md`). AE-NAC additionally needs a VASP source patch
-from the CA-NAC authors and is **not** used by the default (`is_alle: false`)
-path.
+or point at your own installs in the campaign:
+
+```yaml
+nac:
+  canac_dir: ~/src/CA-NAC
+  vaspwfc_dir: ~/src/VaspBandUnfolding
+```
+
+Resolution order: `nac.canac_dir` → `$NAMDFORGE_CANAC_DIR` →
+`third_party/_src/CA-NAC` → importable `CAnac`. `inamd nac prepare` reports
+what it found (`canac.found`, `canac.how`); `inamd nac run` refuses if nothing
+is resolvable unless you pass `--allow-missing` (for when the compute node's
+`canac` job sets it up itself). When a directory *is* resolved, `run_canac.sh`
+prepends it to `PYTHONPATH`.
+
+AE-NAC (`is_alle: true`) additionally needs a VASP source patch from the CA-NAC
+authors and is **not** used by the default path.
 
 ## How NAMD Launcher drives it
 
-`inamd nac prepare` renders `snapshots/input.py` from the campaign `nac:` block:
+`inamd nac prepare` renders **only** `snapshots/input.py` from the campaign
+`nac:` block (nothing is copied in -- CA-NAC's `CAnac.py` etc. come from the
+resolved install via `PYTHONPATH`):
 
 | campaign key | `input.py` variable | meaning |
 |---|---|---|

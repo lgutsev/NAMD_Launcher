@@ -1,10 +1,12 @@
 """Stage 4 -- non-adiabatic couplings via CA-NAC.
 
-``prepare`` renders ``input.py`` (from the campaign ``nac:`` block) and drops
-the CA-NAC driver next to the snapshot folders -- CA-NAC's ``Dirs = ['./001/',
-...]`` are resolved relative to that directory, exactly as in the original
-workflow. ``run`` submits ``python input.py`` under the ``canac`` job.
-``collect`` maps CA-NAC's text outputs to the Hefei-NAMD input names:
+CA-NAC (and VaspBandUnfolding) is a *dependency you install*, not vendored code
+-- see ``third_party/README.md``. ``prepare`` renders ``input.py`` from the
+campaign ``nac:`` block next to the snapshot folders (CA-NAC's
+``Dirs = ['./001/', ...]`` resolve there) and resolves the CA-NAC / vaspwfc
+locations. ``run`` submits ``python input.py`` under the ``canac`` job, with
+those directories prepended to ``PYTHONPATH``. ``collect`` maps the text
+outputs to the Hefei-NAMD input names:
 
     CAnac_*_re.txt  ->  nac/NATXT
     CAeig_*.txt     ->  nac/EIGTXT   and   nac/energy.dat   (dephasing input)
@@ -18,6 +20,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+from ._deps import pythonpath_prefix, resolve_canac, resolve_vaspwfc
 from ._run import submit
 from ._stage import rollup_status, write_audit, write_manifest
 from ._template import python_bool, render
@@ -27,8 +30,6 @@ from .errors import SafetyError
 from .state import StateStore
 
 STAGE = "nac"
-_CANAC_LIBS = ("CAnac.py", "aeolap.py", "mod_hungarian.py")
-_THIRD_PARTY = Path(__file__).resolve().parents[2] / "third_party" / "ca_nac"
 
 
 def _require(campaign: Campaign, *keys: str) -> dict[str, Any]:
@@ -37,17 +38,6 @@ def _require(campaign: Campaign, *keys: str) -> dict[str, Any]:
     if missing:
         raise SafetyError(f"campaign nac: block needs {', '.join(missing)}")
     return nac
-
-
-def _canac_lib_dir() -> Path:
-    """Where CAnac.py etc. live (repo checkout, or fall back to packaged copy)."""
-
-    if (_THIRD_PARTY / "CAnac.py").is_file():
-        return _THIRD_PARTY
-    raise SafetyError(
-        "CA-NAC driver not found under third_party/ca_nac/. This is a source "
-        "checkout requirement; see third_party/README.md."
-    )
 
 
 def render_input_py(campaign: Campaign) -> str:
@@ -88,13 +78,15 @@ def prepare_nac(campaign: Campaign, *, dry_run: bool = False, force: bool = Fals
         raise SafetyError("Run `inamd snapshots prepare` (and `inamd waverun`) first.")
 
     input_py = render_input_py(campaign)
-    lib_dir = _canac_lib_dir()
+    canac = resolve_canac(campaign.nac)
+    vaspwfc = resolve_vaspwfc(campaign.nac)
     plan = {
         "stage": STAGE,
         "campaign": str(campaign.path),
         "run_dir": str(snap_root),
         "collect_dir": str(nac_root),
-        "driver_source": str(lib_dir),
+        "canac": canac,
+        "vaspwfc": vaspwfc,
         "bmin": campaign.nac["bmin"],
         "bmax": campaign.nac["bmax"],
         "nbasis_out": campaign.nac["bmax"] - campaign.nac["bmin"] + 1,
@@ -108,27 +100,17 @@ def prepare_nac(campaign: Campaign, *, dry_run: bool = False, force: bool = Fals
         raise SafetyError(f"{snap_root / 'input.py'} already exists; re-run with --force.")
 
     (snap_root / "input.py").write_text(input_py, encoding="utf-8")
-    copied = []
-    for name in _CANAC_LIBS:
-        shutil.copy2(lib_dir / name, snap_root / name)
-        copied.append(name)
 
     nac_root.mkdir(parents=True, exist_ok=True)
-    manifest = write_manifest(nac_root, STAGE, {**plan, "canac_libs": copied})
+    manifest = write_manifest(nac_root, STAGE, plan)
     audit = audit_nac(campaign)
     state = StateStore(campaign.root)
-    state.event("nac.prepare", run_dir=str(snap_root), nsw=plan["nsw"])
+    state.event("nac.prepare", run_dir=str(snap_root), nsw=plan["nsw"], canac_found=canac["found"])
     state.artifact("nac_manifest", manifest)
-    return {
-        "mode": "prepared",
-        **plan,
-        "canac_libs": copied,
-        "manifest": str(manifest),
-        "audit_status": audit["status"],
-    }
+    return {"mode": "prepared", **plan, "manifest": str(manifest), "audit_status": audit["status"]}
 
 
-def run_nac(campaign: Campaign, *, execute: bool = False) -> dict[str, Any]:
+def run_nac(campaign: Campaign, *, execute: bool = False, allow_missing: bool = False) -> dict[str, Any]:
     snap_root = campaign.stage_dir("snapshots")
     if not (snap_root / "input.py").is_file():
         raise SafetyError("Run `inamd nac prepare` first.")
@@ -137,17 +119,41 @@ def run_nac(campaign: Campaign, *, execute: bool = False) -> dict[str, Any]:
         raise SafetyError("Scheduler profile has no 'canac' job")
     from ._compat import render_job, write_job
 
+    canac = resolve_canac(campaign.nac)
+    vaspwfc = resolve_vaspwfc(campaign.nac)
+    if not canac["found"] and not allow_missing:
+        raise SafetyError(
+            f"CA-NAC not found ({canac['hint']}). The `canac` job may still provide it "
+            "at runtime -- pass --allow-missing to build the script anyway."
+        )
+
+    base_command = str(profile["jobs"]["canac"].get("command", "")).strip() or "python input.py"
+    prefix = [Path(p).as_posix() for p in pythonpath_prefix(canac, vaspwfc)]
+    if prefix:
+        joined = ":".join(prefix)
+        command = f'export PYTHONPATH="{joined}:${{PYTHONPATH:-}}"\n{base_command}'
+    else:
+        command = (
+            "# CA-NAC / VaspBandUnfolding must be importable here -- set PYTHONPATH\n"
+            "# or CANAC_ACTIVATE_SCRIPT in the `canac` job.\n"
+            f"{base_command}"
+        )
     script = render_job(
-        profile, "canac",
-        command=str(profile["jobs"]["canac"].get("command", "")).strip() or "python input.py",
+        profile, "canac", command=command,
         job_name=f"{campaign.name}_canac", working_directory=snap_root.as_posix(),
     )
     script_path = snap_root / "run_canac.sh"
     write_job(script_path, script, force=True)
     outcome = submit(profile, script_path, execute=execute)
     logged = {k: v for k, v in outcome.items() if k not in ("stdout_tail", "stderr_tail")}
-    StateStore(campaign.root).event("nac.run", execute=execute, **logged)
-    return {"mode": "submitted" if execute else "dry-run", "script": str(script_path), **outcome}
+    StateStore(campaign.root).event("nac.run", execute=execute, canac=canac["how"], **logged)
+    return {
+        "mode": "submitted" if execute else "dry-run",
+        "script": str(script_path),
+        "canac": canac,
+        "vaspwfc": vaspwfc,
+        **outcome,
+    }
 
 
 def _newest(root: Path, pattern: str) -> Path | None:
@@ -209,6 +215,9 @@ def audit_nac(campaign: Campaign) -> dict[str, Any]:
         nbasis = campaign.nac["bmax"] - campaign.nac["bmin"] + 1
 
     rows: list[dict[str, Any]] = []
+    prepared = (nac_root / "nac_manifest.json").is_file()
+    canac = resolve_canac(campaign.nac) if prepared else None
+
     for name in ("NATXT", "EIGTXT", "energy.dat"):
         path = nac_root / name
         if not path.is_file() or not path.stat().st_size:
@@ -235,13 +244,18 @@ def audit_nac(campaign: Campaign) -> dict[str, Any]:
                 )
 
     status = rollup_status([r["status"] for r in rows]) if rows else "PENDING"
+    summary = "NATXT / EIGTXT / energy.dat " + (
+        "ready" if status == "PASS" else "not ready" if status != "FAIL" else "inconsistent"
+    )
+    if canac is not None and not canac["found"] and status in {"PENDING", "PASS"}:
+        summary += f"  (note: CA-NAC install not resolved -- {canac['how']}; needed for `inamd nac run`)"
     audit = {
         "status": status,
         "root": str(nac_root),
         "expected_nbasis": nbasis,
+        "canac_install": canac,
         "runs": rows,
-        "summary": "NATXT / EIGTXT / energy.dat "
-        + ("ready" if status == "PASS" else "not ready" if status != "FAIL" else "inconsistent"),
+        "summary": summary,
     }
     write_audit(nac_root, STAGE, audit, rows=rows)
     return audit
@@ -256,7 +270,7 @@ def _cmd(args: argparse.Namespace) -> int:
     if cmd == "prepare":
         _json(prepare_nac(campaign, dry_run=args.dry_run, force=args.force))
     elif cmd == "run":
-        _json(run_nac(campaign, execute=args.execute))
+        _json(run_nac(campaign, execute=args.execute, allow_missing=args.allow_missing))
     elif cmd == "collect":
         _json(collect_nac(campaign, force=args.force))
     else:
@@ -268,7 +282,7 @@ def _cmd(args: argparse.Namespace) -> int:
 def _register(commands: Any, add_campaign_option: Any) -> None:
     parser = commands.add_parser(STAGE, help="CA-NAC non-adiabatic couplings + eigenvalues")
     sub = parser.add_subparsers(dest="nac_command", required=True)
-    prepare = sub.add_parser("prepare", help="Render input.py and stage the CA-NAC driver")
+    prepare = sub.add_parser("prepare", help="Render input.py; resolve the CA-NAC / vaspwfc install")
     add_campaign_option(prepare)
     prepare.add_argument("--dry-run", action="store_true")
     prepare.add_argument("--force", action="store_true")
@@ -276,6 +290,11 @@ def _register(commands: Any, add_campaign_option: Any) -> None:
     run = sub.add_parser("run", help="Submit `python input.py` under the canac job")
     add_campaign_option(run)
     run.add_argument("--execute", action="store_true")
+    run.add_argument(
+        "--allow-missing",
+        action="store_true",
+        help="build the job script even if CA-NAC is not resolvable here (the compute env may provide it)",
+    )
     run.set_defaults(func=_cmd)
     collect = sub.add_parser("collect", help="Map CAnac_*/CAeig_* to NATXT / EIGTXT / energy.dat")
     add_campaign_option(collect)

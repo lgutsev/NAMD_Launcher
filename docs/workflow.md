@@ -11,7 +11,7 @@ campaign root/
 ├─ snapshots/          stage 1-3   (POSCARs, WAVECAR SCFs, KS diagnostics)
 │  ├─ INCAR KPOINTS POTCAR
 │  ├─ 001/ 002/ ... NSW/           POSCAR + linked inputs + (later) WAVECAR/EIGENVAL/PROCAR
-│  ├─ input.py CAnac.py aeolap.py mod_hungarian.py     (staged by `nac prepare`)
+│  ├─ input.py run_canac.sh                             (written by `nac prepare` / `nac run`)
 │  └─ CAnac_*_re.txt CAeig_*.txt                        (written by the CA-NAC job)
 ├─ nac/               stage 4-5b  (NATXT EIGTXT energy.dat DEPHTIME INICON)
 └─ namd/              stage 6-7   (inp + staged inputs, SHPROP.*, data.txt, shprop_fit.json)
@@ -68,12 +68,16 @@ Optional KS-manifold sanity check before committing to NAC.
 
 ## 4 · `inamd nac {prepare,run,collect}`
 
-CA-NAC (`third_party/ca_nac/`), driven by a generated `input.py`.
+CA-NAC, driven by a generated `input.py`. CA-NAC is a **dependency you
+install** (`third_party/fetch.sh`, or `nac.canac_dir` / `nac.vaspwfc_dir`), not
+vendored code — see [ca-nac.md](ca-nac.md).
 
-- `prepare` renders `snapshots/input.py` from the campaign `nac:` block and
-  copies `CAnac.py`, `aeolap.py`, `mod_hungarian.py` next to the folders (so
-  CA-NAC's `./001/` paths resolve).
-- `run` submits `python input.py` under the `canac` job.
+- `prepare` renders **only** `snapshots/input.py` from the campaign `nac:`
+  block (CA-NAC's `./001/` paths resolve because the job `cd`s there) and
+  reports which CA-NAC / vaspwfc install it resolved.
+- `run` submits `python input.py` under the `canac` job, prepending the
+  resolved directories to `PYTHONPATH`. Refuses if CA-NAC is unresolvable
+  unless `--allow-missing`.
 - `collect` maps the outputs:
   `CAnac_*_re.txt → nac/NATXT`, `CAeig_*.txt → nac/EIGTXT` and `nac/energy.dat`.
   The audit checks `NATXT` has `(BMAX-BMIN+1)²` columns, `EIGTXT` has

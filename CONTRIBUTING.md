@@ -25,8 +25,10 @@ engine/version/cluster combination needs a small human-checked smoke run.
 - Reuse `namd_launcher._compat` (InterfaceForge helpers when installed) rather
   than reimplementing INCAR/POTCAR/scheduler logic.
 
-## Third-party code
+## External engines
 
-`third_party/` is not MIT. Keep upstream headers intact, update the relevant
-`PROVENANCE.md` with the commit you took, and never relicense
-`mod_hungarian.py` (GPL-2.0+).
+NAMD Launcher redistributes **no** CA-NAC / VaspBandUnfolding / Hefei-NAMD
+code. `third_party/` holds only `README.md` + `fetch.sh` (pinned commits).
+Resolve installs through `namd_launcher._deps` (campaign key → env var →
+`third_party/_src/` → importable); never copy engine source into the repo or a
+campaign directory.

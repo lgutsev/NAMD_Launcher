@@ -35,7 +35,8 @@ step2-*` run directory is a first-class input here.
   12 (12), 3082–3089. Repository: <https://github.com/WeibinChu/CA-NAC>.
 - **VaspBandUnfolding** (`vaspwfc`, `paw`, `spinorb`) — Qijing Zheng.
   <https://github.com/QijingZheng/VaspBandUnfolding>.
-- **`mod_hungarian.py`** — Alexey V. Akimov, from the Libra project (GPL-2.0+).
+- **`mod_hungarian.py`** (used by CA-NAC's state reordering) — Alexey V.
+  Akimov, from the Libra project (GPL-2.0+).
 - **N2AMD** — Zhang et al., *Nat. Commun.* **16** (2025); arXiv:2408.06654
   (see [`docs/n2amd.md`](docs/n2amd.md) for the optional step-3 integration).
 
@@ -49,8 +50,15 @@ git clone https://github.com/lgutsev/NAMD_Launcher.git
 cd NAMD_Launcher
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"          # or ".[report]" for just the plotting/fit deps
-bash third_party/fetch.sh        # clones Hefei-NAMD + VaspBandUnfolding (build/import deps)
+bash third_party/fetch.sh        # clones CA-NAC + VaspBandUnfolding + Hefei-NAMD
 ```
+
+**NAMD Launcher redistributes none of the scientific engines.** CA-NAC,
+VaspBandUnfolding and Hefei-NAMD are dependencies you install — `fetch.sh`
+clones them at pinned commits into `third_party/_src/` (git-ignored), or point
+at your own installs with `nac.canac_dir` / `nac.vaspwfc_dir` / `namd.binary_dir`
+(or `$NAMDFORGE_CANAC_DIR` / `$NAMDFORGE_VASPWFC_DIR`). See
+[`third_party/README.md`](third_party/README.md).
 
 `pip install -e ".[interfaceforge]"` additionally reuses InterfaceForge's exact
 scheduler / INCAR / POTCAR helpers; without it, faithful vendored copies are
@@ -102,7 +110,7 @@ cluster job).
 |---|---|
 | `src/namd_launcher/` | the launcher (MIT) |
 | `src/namd_launcher/templates/` | `namd_campaign.yaml`, profiles, `INCAR.nac`, `inp.{dish,fssh}`, CA-NAC input template |
-| `third_party/` | CA-NAC + Hefei-NAMD scripts (their own licenses; see each `PROVENANCE.md`) |
+| `third_party/` | pointers + `fetch.sh` only — no engine code is redistributed |
 | `docs/` | [workflow](docs/workflow.md), [Hefei-NAMD](docs/hefei-namd.md), [CA-NAC](docs/ca-nac.md), [N2AMD](docs/n2amd.md), [InterfaceForge integration](docs/interfaceforge-integration.md) |
 
 ## Status

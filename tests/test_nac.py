@@ -35,22 +35,64 @@ def test_render_input_py(with_snapshots: Path) -> None:
     assert "@" not in text  # every placeholder filled
 
 
-def test_prepare_stages_driver(with_snapshots: Path) -> None:
+def test_prepare_renders_input_py(with_snapshots: Path) -> None:
     campaign = load_campaign(with_snapshots / "namd_campaign.yaml")
     dry = prepare_nac(campaign, dry_run=True)
     assert dry["mode"] == "dry-run"
     assert dry["nbasis_out"] == 2
+    assert dry["canac"]["found"] in (True, False)  # resolution attempted, not vendored
 
     result = prepare_nac(campaign)
     snap = with_snapshots / "snapshots"
     assert (snap / "input.py").is_file()
-    for lib in ("CAnac.py", "aeolap.py", "mod_hungarian.py"):
-        assert (snap / lib).is_file()
+    # nothing from CA-NAC is copied in -- it is a dependency, not vendored
+    assert not (snap / "CAnac.py").exists()
     assert (with_snapshots / "nac" / "nac_manifest.json").is_file()
     assert result["audit_status"] == "PENDING"
 
     with pytest.raises(SafetyError, match="already exists"):
         prepare_nac(campaign)
+
+
+def test_run_requires_canac_or_allow_missing(with_snapshots: Path, monkeypatch) -> None:
+    monkeypatch.delenv("NAMDFORGE_CANAC_DIR", raising=False)
+    campaign = load_campaign(with_snapshots / "namd_campaign.yaml")
+    prepare_nac(campaign)
+    from namd_launcher.nac import run_nac
+
+    # CA-NAC not installed in the test env -> refuses without --allow-missing
+    with pytest.raises(SafetyError, match="CA-NAC not found"):
+        run_nac(campaign)
+    out = run_nac(campaign, allow_missing=True)
+    assert out["mode"] == "dry-run"
+    body = Path(out["script"]).read_text(encoding="utf-8")
+    assert "python input.py" in body
+
+
+def test_run_uses_configured_canac_dir(with_snapshots: Path, tmp_path: Path) -> None:
+    fake = tmp_path / "CA-NAC"
+    fake.mkdir()
+    (fake / "CAnac.py").write_text("# stub\n", encoding="utf-8")
+    vbu = tmp_path / "VaspBandUnfolding"
+    vbu.mkdir()
+    (vbu / "vaspwfc.py").write_text("# stub\n", encoding="utf-8")
+
+    campaign_file = with_snapshots / "namd_campaign.yaml"
+    campaign_file.write_text(
+        campaign_file.read_text(encoding="utf-8").replace(
+            "  nproc: 2\n",
+            f"  nproc: 2\n  canac_dir: {fake.as_posix()}\n  vaspwfc_dir: {vbu.as_posix()}\n",
+        ),
+        encoding="utf-8",
+    )
+    campaign = load_campaign(campaign_file)
+    from namd_launcher.nac import run_nac
+
+    prepare_nac(campaign)
+    out = run_nac(campaign)
+    assert out["canac"]["found"] is True
+    body = Path(out["script"]).read_text(encoding="utf-8")
+    assert fake.as_posix() in body
 
 
 def test_collect_and_audit(with_snapshots: Path) -> None:

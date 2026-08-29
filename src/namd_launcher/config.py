@@ -175,6 +175,9 @@ def _validate_nac(nac: dict[str, Any]) -> dict[str, Any]:
         raise ConfigurationError("nac.iformat must be HFNAMD or PYXAID")
     if "potim" in nac:
         nac["potim"] = _float(nac["potim"], "nac.potim")
+    for key in ("canac_dir", "vaspwfc_dir"):
+        if nac.get(key):
+            nac[key] = str(Path(str(nac[key])).expanduser())
     if {"bmin", "bmax"} <= nac.keys() and nac["bmin"] > nac["bmax"]:
         raise ConfigurationError("nac.bmin must not exceed nac.bmax")
     if {"bmin_stored", "bmax_stored", "bmin", "bmax"} <= nac.keys():
@@ -223,6 +226,8 @@ def _validate_namd(namd: dict[str, Any]) -> dict[str, Any]:
     namd["lshp"] = _bool(namd.get("lshp", True), "namd.lshp")
     namd["debuglevel"] = str(namd.get("debuglevel", "I"))
     namd["rundir"] = str(namd.get("rundir", "."))
+    if namd.get("binary_dir"):
+        namd["binary_dir"] = str(Path(str(namd["binary_dir"])).expanduser())
     if {"bmin", "bmax"} <= namd.keys() and namd["bmin"] > namd["bmax"]:
         raise ConfigurationError("namd.bmin must not exceed namd.bmax")
     return namd
