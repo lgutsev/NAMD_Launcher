@@ -194,6 +194,28 @@ def test_molecules_slab_and_depth(tmp_path: Path) -> None:
     assert {b["bond"] for b in geo["heavy_bonds"]} == {"C148-N149", "C148-N150"}
 
 
+def test_split_framework_pieces_count_as_framework(tmp_path: Path) -> None:
+    """A Pb-I piece cut off from the lattice by a stretched bond, and a lone iodide, are framework, not molecules;
+    all framework weight is one entry."""
+    pb = [(3.2 * i, 3.2 * j, 5.0) for i in range(7) for j in range(7)]
+    piece_pb = [(10.0, 10.0, 12.0)]
+    piece_i = [(10.0, 10.0, 15.0), (13.0, 10.0, 12.0)]   # 3.0 A from the piece's Pb, 7 A from the layer
+    lone_i = [(1.6, 1.6, 20.0)]
+    mol_c, mol_n, mol_h = [(1.6, 1.6, 26.0)], [(2.95, 1.6, 26.0), (0.25, 1.6, 26.0)], [(1.6, 2.68, 26.0)]
+    lines = ["split", "1.0", "22.4 0 0", "0 22.4 0", "0 0 40", "Pb I C N H", "50 3 1 2 1", "Cartesian"]
+    lines += [f"{x:.4f} {y:.4f} {z:.4f}" for x, y, z in pb + piece_pb + piece_i + lone_i + mol_c + mol_n + mol_h]
+    (tmp_path / "POSCAR").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    struct = read_structure(tmp_path / "POSCAR")
+    mols = molecules(*struct)
+    assert sorted(len(g) for g in mols["groups"]) == [1, 3, 4, 49]
+    # 0-based: 0 layer Pb, 49 piece Pb, 50/51 piece I, 52 lone I, 53 C, 54/55 N
+    weights = {0: 0.1, 49: 0.3, 50: 0.1, 51: 0.1, 52: 0.1, 53: 0.2, 54: 0.05, 55: 0.05}
+    out = band_molecules(weights, struct, mols, None, struct)
+    assert out[0]["kind"] == "framework" and out[0]["fraction"] == 0.7 and out[0]["atoms"] == 53
+    assert out[1]["kind"] == "molecule" and out[1]["formula"] == "CHN2" and out[1]["fraction"] == 0.3
+    assert len(out) == 2 and "geometry" in out[1]
+
+
 def test_edges_details_report_molecule_geometry(campaign_dir: Path) -> None:
     n = 151
     for k, stretch in ((1, 0.0), (2, 0.0), (3, 0.2)):

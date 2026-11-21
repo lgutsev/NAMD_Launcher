@@ -130,6 +130,17 @@ COVALENT_A = {"H": 0.31, "B": 0.84, "C": 0.76, "N": 0.71, "O": 0.66, "F": 0.57, 
               "Ge": 1.20, "Bi": 1.48, "Ti": 1.60, "Zn": 1.22, "Cd": 1.44, "Ag": 1.45, "Cu": 1.32, "Se": 1.20}
 BOND_SKIN = 1.15
 FRAMEWORK_SIZE = 40
+# Stretched metal-halide bonds fall outside the covalent cutoff, which splits the inorganic lattice into pieces.
+# Any group holding a B-site metal, or made only of halides, is therefore framework, whatever its size.
+FRAMEWORK_METALS = frozenset({"Pb", "Sn", "Ge", "Bi"})
+HALIDES = frozenset({"F", "Cl", "Br", "I"})
+
+
+def is_framework(elements: list[str], atoms: list[int]) -> bool:
+    """True for the inorganic lattice: more than 40 atoms, any B-site metal, or halides only."""
+
+    els = {elements[a] for a in atoms}
+    return len(atoms) > FRAMEWORK_SIZE or bool(els & FRAMEWORK_METALS) or els <= HALIDES
 
 
 def read_structure(path: Path) -> tuple[Any, Any, list[str]]:
@@ -160,8 +171,8 @@ def _delta(lattice: Any, frac: Any, i: int, js: Any) -> Any:
 
 
 def molecules(lattice: Any, frac: Any, elements: list[str]) -> dict[str, Any]:
-    """Connected groups of atoms (covalent radii x 1.15, minimum image). Groups larger than 40 atoms are the
-    framework. Returns {'groups': [[atom indices]], 'of': {atom: group}, 'bonds': {(i, j)}}."""
+    """Connected groups of atoms (covalent radii x 1.15, minimum image). ``is_framework`` decides which groups are
+    the inorganic lattice. Returns {'groups': [[atom indices]], 'of': {atom: group}, 'bonds': {(i, j)}}."""
 
     import numpy as np
 
@@ -296,15 +307,19 @@ def band_molecules(weights: dict[int, float], struct: tuple, mols: dict[str, Any
 
     lattice, frac, el = struct
     total = sum(weights.values()) or 1.0
+    # All framework pieces count as one entry (key -1); each molecule is its own entry.
+    fw_groups = [g for g, atoms in enumerate(mols["groups"]) if is_framework(el, atoms)]
+    fw_set = set(fw_groups)
     per: dict[int, float] = {}
     for a, w in weights.items():
         g = mols["of"][a]
-        per[g] = per.get(g, 0.0) + w / total
+        key = -1 if g in fw_set else g
+        per[key] = per.get(key, 0.0) + w / total
     out = []
     geometry_done = False
     for g, w in sorted(per.items(), key=lambda kv: -kv[1])[:top]:
-        atoms = mols["groups"][g]
-        framework = len(atoms) > FRAMEWORK_SIZE
+        framework = g == -1
+        atoms = [a for f in fw_groups for a in mols["groups"][f]] if framework else mols["groups"][g]
         entry: dict[str, Any] = {"fraction": round(w, 4), "kind": "framework" if framework else "molecule",
                                  "atoms": len(atoms)}
         if not framework:

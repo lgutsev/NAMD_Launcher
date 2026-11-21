@@ -28,8 +28,10 @@ It flags:
 For the most changed frames (`--detail`, default 8) and any listed with `--frames`, it breaks bands
 `bmin-1`…`bmax+1` down:
 - by atom (index, element, height z), and by element and z to 1 Å;
-- by molecule. Atoms are grouped by covalent bonds (radii × 1.15, minimum image); groups over 40 atoms count as the
-  framework. Each group gets its formula, atom indices, share of the band, and depth below the nearer slab face. The
+- by molecule. Atoms are grouped by covalent bonds (radii × 1.15, minimum image). A group counts as the
+  framework if it has over 40 atoms, holds a B-site metal (Pb, Sn, Ge, Bi), or is made only of halides: stretched
+  Pb–I bonds (over 3.28 Å) fall outside the cutoff and would otherwise split the lattice into small "molecules".
+  All framework weight is reported as one entry. Each group gets its formula, atom indices, share of the band, and depth below the nearer slab face. The
   slab normal is the lattice direction with the widest vacuum gap of 5 Å or more.
 - For the leading molecule (≥ 10 % of the band): its heavy-atom bonds and angles and its largest X–H change, each
   against the same atoms in frame 1, and whether those atoms were the same molecule in frame 1. A band edge on a
