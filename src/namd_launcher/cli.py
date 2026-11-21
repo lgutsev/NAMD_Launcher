@@ -131,6 +131,7 @@ def _load_stage_modules() -> None:
         "snapshots",
         "waverun",
         "nac",
+        "checks",
         "dephase",
         "inicon",
         "hefeinamd",
