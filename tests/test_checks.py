@@ -153,3 +153,69 @@ def test_cli_exit_codes(campaign_dir: Path) -> None:
     assert code == 3 and payload["status"] == "FAIL"
     saved = json.loads((campaign_dir / "nac" / "check_nac.json").read_text(encoding="utf-8"))
     assert saved["status"] == "FAIL"
+
+
+# --------------------------------------------------------------------------- #
+# molecules, slab axis and geometry in the edge details
+# --------------------------------------------------------------------------- #
+from namd_launcher.checks import band_molecules, molecules, read_structure, slab_axis  # noqa: E402
+
+
+def _slab_poscar(path: Path, n_stretch: float = 0.0) -> int:
+    """Three 7x7 Pb layers (z 5, 11, 17; each one framework group) in a 22.4 x 22.4 x 40 cell, and a C-N-N-H
+    molecule at z 8 between the first two layers. Returns the number of atoms."""
+    pb = [(3.2 * i, 3.2 * j, z) for z in (5.0, 11.0, 17.0) for i in range(7) for j in range(7)]
+    mol_c = [(1.6, 1.6, 8.0)]
+    mol_n = [(2.95 + n_stretch, 1.6, 8.0), (0.25, 1.6, 8.0)]
+    mol_h = [(1.6, 2.68, 8.0)]
+    lines = ["slab", "1.0", "22.4 0 0", "0 22.4 0", "0 0 40", "Pb C N H",
+             f"{len(pb)} 1 2 1", "Cartesian"]
+    lines += [f"{x:.4f} {y:.4f} {z:.4f}" for x, y, z in pb + mol_c + mol_n + mol_h]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return len(pb) + 4
+
+
+def test_molecules_slab_and_depth(tmp_path: Path) -> None:
+    _slab_poscar(tmp_path / "POSCAR")
+    struct = read_structure(tmp_path / "POSCAR")
+    mols = molecules(*struct)
+    sizes = sorted(len(g) for g in mols["groups"])
+    assert sizes == [4, 49, 49, 49]
+    slab = slab_axis(*struct)
+    assert slab["axis"] == "c" and slab["slab_A"] == 12.0 and slab["gap_A"] == 28.0
+    weights = {147: 0.5, 148: 0.2, 149: 0.2, 0: 0.1}  # C, N, N (0-based) and one Pb
+    out = band_molecules(weights, struct, mols, slab, struct)
+    mol = out[0]
+    assert mol["kind"] == "molecule" and mol["formula"] == "CHN2" and mol["fraction"] == 0.9
+    assert mol["depth_A"] == 3.0
+    assert out[1]["kind"] == "framework"
+    geo = mol["geometry"]
+    assert geo["same_atoms_bonded_in_reference"] is True
+    assert {b["bond"] for b in geo["heavy_bonds"]} == {"C148-N149", "C148-N150"}
+
+
+def test_edges_details_report_molecule_geometry(campaign_dir: Path) -> None:
+    n = 151
+    for k, stretch in ((1, 0.0), (2, 0.0), (3, 0.2)):
+        d = campaign_dir / "snapshots" / f"{k:03d}"
+        d.mkdir(parents=True, exist_ok=True)
+        _eigenval(d / "EIGENVAL", E0)
+        _slab_poscar(d / "POSCAR", n_stretch=stretch)
+        cbm = [0.0] * n
+        if k == 3:
+            cbm[147], cbm[148] = 0.6, 0.3  # C and N carry the CBM
+            cbm[0] = 0.1
+        else:
+            cbm[0] = 1.0
+        vbm = [0.0] * n
+        vbm[50] = 1.0
+        _procar(d / "PROCAR", {4: vbm, 5: cbm, 3: vbm, 6: cbm[:]}, nb=7)
+    r = check_edges(load_campaign(campaign_dir / "namd_campaign.yaml"))
+    assert r["changed_frames"] == [3]
+    d3 = {d["frame"]: d for d in r["details"]}[3]
+    mol = d3["5"]["molecules"][0]
+    assert mol["formula"] == "CHN2" and mol["depth_A"] == 3.0
+    bonds = {b["bond"]: b for b in mol["geometry"]["heavy_bonds"]}
+    assert bonds["C148-N149"]["d_A"] == 1.55 and bonds["C148-N149"]["ref_A"] == 1.35
+    md = Path(r["files"]["markdown"]).read_text(encoding="utf-8")
+    assert "molecule CHN2" in md and "3.0 A below the nearer face" in md and "C148-N149 1.550 (frame 1 1.35)" in md

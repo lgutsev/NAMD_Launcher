@@ -26,8 +26,18 @@ It flags:
   state has taken over a band edge.
 
 For the most changed frames (`--detail`, default 8) and any listed with `--frames`, it breaks bands
-`bmin-1`…`bmax+1` down by atom (index, element, height z) and by element and z to 1 Å, so a surface molecule can be
-told from the bulk. It also inventories CA-NAC's `*.npy` overlap caches and the stored window.
+`bmin-1`…`bmax+1` down:
+- by atom (index, element, height z), and by element and z to 1 Å;
+- by molecule. Atoms are grouped by covalent bonds (radii × 1.15, minimum image); groups over 40 atoms count as the
+  framework. Each group gets its formula, atom indices, share of the band, and depth below the nearer slab face. The
+  slab normal is the lattice direction with the widest vacuum gap of 5 Å or more.
+- For the leading molecule (≥ 10 % of the band): its heavy-atom bonds and angles and its largest X–H change, each
+  against the same atoms in frame 1, and whether those atoms were the same molecule in frame 1. A band edge on a
+  distorted or broken molecule shows up here.
+
+It also inventories CA-NAC's `*.npy` overlap caches and the stored window. At CA-NAC a1e0e24 with `icor 1`, the
+`tdolap_<stored window>` caches hold the phase-corrected overlaps for the whole stored window, so a wider NAC window
+inside it can be recomputed from the caches without the WAVECARs. Keep the caches if that may be needed.
 
 PROCAR parsing reads most of each file (the window bands sit deep in it). For hundreds of frames, run it as a batch
 job, not on a login node.

@@ -122,6 +122,202 @@ def read_procar(path: Path, bands: list[int]) -> dict[int, dict[int, float]]:
     return out
 
 
+# --------------------------------------------------------------------------- #
+# structure: molecules, slab axis, geometry against a reference frame
+# --------------------------------------------------------------------------- #
+COVALENT_A = {"H": 0.31, "B": 0.84, "C": 0.76, "N": 0.71, "O": 0.66, "F": 0.57, "Si": 1.11, "P": 1.07, "S": 1.05,
+              "Cl": 1.02, "Br": 1.20, "I": 1.39, "Sn": 1.39, "Pb": 1.46, "Cs": 2.44, "Rb": 2.20, "K": 2.03,
+              "Ge": 1.20, "Bi": 1.48, "Ti": 1.60, "Zn": 1.22, "Cd": 1.44, "Ag": 1.45, "Cu": 1.32, "Se": 1.20}
+BOND_SKIN = 1.15
+FRAMEWORK_SIZE = 40
+
+
+def read_structure(path: Path) -> tuple[Any, Any, list[str]]:
+    """(lattice 3x3 in Angstrom, fractional coordinates Nx3 wrapped to [0,1), elements) from a POSCAR."""
+
+    import numpy as np
+
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    scale = float(lines[1].split()[0])
+    lattice = np.array([[float(v) for v in lines[i].split()[:3]] for i in (2, 3, 4)]) * scale
+    names, counts = lines[5].split(), [int(v) for v in lines[6].split()]
+    i = 7
+    if lines[i].strip()[:1] in "sS":
+        i += 1
+    direct = lines[i].strip()[:1] in "dD"
+    elements = [n for n, c in zip(names, counts) for _ in range(c)]
+    xyz = np.array([[float(t) for t in line.split()[:3]] for line in lines[i + 1 : i + 1 + len(elements)]])
+    frac = xyz if direct else (xyz * scale) @ np.linalg.inv(lattice)
+    return lattice, frac % 1.0, elements
+
+
+def _delta(lattice: Any, frac: Any, i: int, js: Any) -> Any:
+    import numpy as np
+
+    d = frac[js] - frac[i]
+    d -= np.round(d)
+    return d @ lattice
+
+
+def molecules(lattice: Any, frac: Any, elements: list[str]) -> dict[str, Any]:
+    """Connected groups of atoms (covalent radii x 1.15, minimum image). Groups larger than 40 atoms are the
+    framework. Returns {'groups': [[atom indices]], 'of': {atom: group}, 'bonds': {(i, j)}}."""
+
+    import numpy as np
+
+    n = len(elements)
+    radii = np.array([COVALENT_A.get(e, 1.5) for e in elements])
+    parent = list(range(n))
+
+    def root(a: int) -> int:
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    bonds = set()
+    idx = np.arange(n)
+    for i in range(n - 1):
+        js = idx[i + 1 :]
+        dist = np.linalg.norm(_delta(lattice, frac, i, js), axis=1)
+        for j in js[dist < BOND_SKIN * (radii[i] + radii[js])]:
+            bonds.add((i, int(j)))
+            parent[root(i)] = root(int(j))
+    groups: dict[int, list[int]] = {}
+    for a in range(n):
+        groups.setdefault(root(a), []).append(a)
+    ordered = sorted(groups.values(), key=lambda g: g[0])
+    return {"groups": ordered, "of": {a: gi for gi, g in enumerate(ordered) for a in g}, "bonds": bonds}
+
+
+def formula(elements: list[str], atoms: list[int]) -> str:
+    count: dict[str, int] = {}
+    for a in atoms:
+        count[elements[a]] = count.get(elements[a], 0) + 1
+    order = [e for e in ("C", "H") if e in count] + sorted(e for e in count if e not in ("C", "H"))
+    return "".join(f"{e}{count[e] if count[e] > 1 else ''}" for e in order)
+
+
+def slab_axis(lattice: Any, frac: Any, elements: list[str], min_gap_a: float = 5.0) -> dict[str, Any] | None:
+    """The lattice direction with the widest empty band of atoms (vacuum), if wider than ``min_gap_a``."""
+
+    import numpy as np
+
+    vol = abs(np.linalg.det(lattice))
+    best = None
+    for k in range(3):
+        height = vol / np.linalg.norm(np.cross(lattice[(k + 1) % 3], lattice[(k + 2) % 3]))
+        f = np.sort(frac[:, k])
+        gaps = np.append(np.diff(f), f[0] + 1.0 - f[-1])
+        g = int(np.argmax(gaps))
+        gap_a = float(gaps[g] * height)
+        if best is None or gap_a > best["gap_A"]:
+            start = float(f[(g + 1) % len(f)])  # first atom after the gap = one slab face
+            best = {"axis": "abc"[k], "index": k, "gap_A": round(gap_a, 2), "height_A": round(float(height), 2),
+                    "slab_A": round(float(height) - gap_a, 2), "face_frac": round(start, 4)}
+    return best if best and best["gap_A"] >= min_gap_a else None
+
+
+def _depth(slab: dict[str, Any] | None, frac_point: Any) -> float | None:
+    """Distance (Angstrom, along the slab normal) from a point to the nearer slab face."""
+
+    if not slab:
+        return None
+    s = ((frac_point[slab["index"]] - slab["face_frac"]) % 1.0) * slab["height_A"]
+    return round(float(min(s, slab["slab_A"] - s)), 2)
+
+
+def _center(lattice: Any, frac: Any, atoms: list[int]) -> Any:
+    import numpy as np
+
+    d = frac[atoms] - frac[atoms[0]]
+    d -= np.round(d)
+    return (frac[atoms[0]] + d.mean(axis=0)) % 1.0
+
+
+def _dist(lattice: Any, frac: Any, i: int, j: int) -> float:
+    import numpy as np
+
+    return float(np.linalg.norm(_delta(lattice, frac, i, np.array([j]))[0]))
+
+
+def _angle(lattice: Any, frac: Any, a: int, c: int, b: int) -> float:
+    import numpy as np
+
+    u = _delta(lattice, frac, c, np.array([a]))[0]
+    v = _delta(lattice, frac, c, np.array([b]))[0]
+    cos = float(np.dot(u, v) / (np.linalg.norm(u) * np.linalg.norm(v)))
+    return float(np.degrees(np.arccos(max(-1.0, min(1.0, cos)))))
+
+
+def molecule_geometry(struct: tuple, mols: dict[str, Any], atoms: list[int], ref: tuple | None) -> dict[str, Any]:
+    """Bonds and angles of one molecule, and the same atoms in the reference frame (frame 1)."""
+
+    lattice, frac, el = struct
+    inside = set(atoms)
+    bonds = sorted(p for p in mols["bonds"] if p[0] in inside and p[1] in inside)
+    out: dict[str, Any] = {"heavy_bonds": [], "angles": []}
+    xh = []
+    for i, j in bonds:
+        d = _dist(lattice, frac, i, j)
+        r = _dist(ref[0], ref[1], i, j) if ref else None
+        label = f"{el[i]}{i + 1}-{el[j]}{j + 1}"
+        if "H" in (el[i], el[j]):
+            xh.append((abs(d - r) if r is not None else 0.0, label, round(d, 3), None if r is None else round(r, 3)))
+        else:
+            out["heavy_bonds"].append({"bond": label, "d_A": round(d, 3), "ref_A": None if r is None else round(r, 3)})
+    if xh:
+        dev = max(xh)
+        out["xh_bonds"] = len(xh)
+        out["xh_largest_change"] = {"bond": dev[1], "d_A": dev[2], "ref_A": dev[3]}
+    nbrs: dict[int, list[int]] = {}
+    for i, j in bonds:
+        if el[i] != "H" and el[j] != "H":
+            nbrs.setdefault(i, []).append(j)
+            nbrs.setdefault(j, []).append(i)
+    for c, ns in sorted(nbrs.items()):
+        for x in range(len(ns)):
+            for y in range(x + 1, len(ns)):
+                a, b = ns[x], ns[y]
+                out["angles"].append({"angle": f"{el[a]}{a + 1}-{el[c]}{c + 1}-{el[b]}{b + 1}",
+                                      "deg": round(_angle(lattice, frac, a, c, b), 1),
+                                      "ref_deg": None if not ref else round(_angle(ref[0], ref[1], a, c, b), 1)})
+    if ref:
+        ref_mols = molecules(*ref)
+        ref_group = {ref_mols["of"][a] for a in atoms}
+        out["same_atoms_bonded_in_reference"] = (
+            len(ref_group) == 1 and sorted(ref_mols["groups"][ref_group.pop()]) == sorted(atoms))
+    return out
+
+
+def band_molecules(weights: dict[int, float], struct: tuple, mols: dict[str, Any], slab: dict[str, Any] | None,
+                   ref: tuple | None, top: int = 3) -> list[dict[str, Any]]:
+    """The groups that carry a band's weight, largest first; geometry for the leading non-framework molecule."""
+
+    lattice, frac, el = struct
+    total = sum(weights.values()) or 1.0
+    per: dict[int, float] = {}
+    for a, w in weights.items():
+        g = mols["of"][a]
+        per[g] = per.get(g, 0.0) + w / total
+    out = []
+    geometry_done = False
+    for g, w in sorted(per.items(), key=lambda kv: -kv[1])[:top]:
+        atoms = mols["groups"][g]
+        framework = len(atoms) > FRAMEWORK_SIZE
+        entry: dict[str, Any] = {"fraction": round(w, 4), "kind": "framework" if framework else "molecule",
+                                 "atoms": len(atoms)}
+        if not framework:
+            entry["formula"] = formula(el, atoms)
+            entry["atom_indices"] = [a + 1 for a in atoms]
+            entry["depth_A"] = _depth(slab, _center(lattice, frac, atoms))
+            if not geometry_done and w >= 0.1:
+                entry["geometry"] = molecule_geometry(struct, mols, atoms, ref)
+                geometry_done = True
+        out.append(entry)
+    return out
+
+
 def _fractions(weights: dict[int, float], elements: list[str]) -> dict[str, float]:
     total = sum(weights.values()) or 1.0
     acc: dict[str, float] = {}
@@ -209,13 +405,22 @@ def check_edges(
     # where the weight sits in the most changed frames (and any asked for)
     pick = list(dict.fromkeys([*(frames or []), *[f for d, f in drifted[:detail] if d > tvd_warn]]))
     details = []
+    folders = dict(_folders(campaign))
+    ref_struct = None
+    first = next((f for _, f in sorted(folders.items()) if (f / "POSCAR").is_file()), None)
+    if first is not None:
+        ref_struct = read_structure(first / "POSCAR")
     for k in pick:
-        folder = dict(_folders(campaign)).get(k)
+        folder = folders.get(k)
         if folder is None or not (folder / "PROCAR").is_file():
             continue
         el, zs = read_poscar(folder / "POSCAR")
         weights = read_procar(folder / "PROCAR", look)
         entry: dict[str, Any] = {"frame": k}
+        struct = read_structure(folder / "POSCAR")
+        mols = molecules(*struct)
+        slab = slab_axis(*struct)
+        entry["slab"] = slab
         for b, w in sorted(weights.items()):
             total = sum(w.values()) or 1.0
             top = sorted(w.items(), key=lambda kv: -kv[1])[:8]
@@ -228,6 +433,7 @@ def check_edges(
                               for i, x in top],
                 "by_element_z": dict(sorted(((k2, round(v, 4)) for k2, v in bins.items() if v >= 0.02),
                                             key=lambda kv: -kv[1])[:10]),
+                "molecules": band_molecules(w, struct, mols, slab, ref_struct),
             }
         details.append(entry)
 
@@ -267,8 +473,9 @@ def check_edges(
 def _ranges(frames: list[int]) -> str:
     if not frames:
         return "none"
+    frames = sorted(frames)
     out, start, prev = [], frames[0], frames[0]
-    for f in sorted(frames)[1:] + [None]:  # type: ignore[list-item]
+    for f in frames[1:] + [None]:  # type: ignore[list-item]
         if f is not None and f == prev + 1:
             prev = f
             continue
@@ -294,13 +501,34 @@ def _edges_md(r: dict[str, Any]) -> str:
     if r["reference_character"]:
         lines += ["Frame-1 make-up: " + "; ".join(f"band {b}: {v}" for b, v in r["reference_character"].items()), ""]
     for d in r["details"]:
+        s = d.get("slab")
         lines.append(f"## Frame {d['frame']}")
+        lines.append(f"Slab normal: lattice {s['axis']}, slab {s['slab_A']} A, vacuum {s['gap_A']} A" if s
+                     else "No vacuum gap of 5 A or more: depths not given")
         for b, v in d.items():
-            if b == "frame":
+            if b in ("frame", "slab"):
                 continue
             lines.append(f"- band {b}: " + ", ".join(f"{k} {x:.3f}" for k, x in v["by_element_z"].items()))
             lines.append("  top atoms: " + ", ".join(
                 f"{a['index']}{a['element']}@{a['z']:.1f} {a['fraction']:.3f}" for a in v["top_atoms"]))
+            for m in v.get("molecules", []):
+                if m["kind"] == "framework":
+                    lines.append(f"  framework ({m['atoms']} atoms): {m['fraction']:.3f}")
+                    continue
+                depth = "" if m["depth_A"] is None else f", {m['depth_A']:.1f} A below the nearer face"
+                lines.append(f"  molecule {m['formula']} (atoms {m['atom_indices']}): {m['fraction']:.3f}{depth}")
+                geo = m.get("geometry")
+                if geo:
+                    hb = "; ".join(f"{x['bond']} {x['d_A']:.3f} (frame 1 {x['ref_A']})" for x in geo["heavy_bonds"])
+                    an = "; ".join(f"{x['angle']} {x['deg']:.1f} (frame 1 {x['ref_deg']})" for x in geo["angles"])
+                    lines.append(f"    bonds: {hb}")
+                    if an:
+                        lines.append(f"    angles: {an}")
+                    if "xh_largest_change" in geo:
+                        x = geo["xh_largest_change"]
+                        lines.append(f"    largest X-H change: {x['bond']} {x['d_A']} (frame 1 {x['ref_A']})")
+                    if "same_atoms_bonded_in_reference" in geo:
+                        lines.append(f"    same molecule in frame 1: {geo['same_atoms_bonded_in_reference']}")
         lines.append("")
     c = r["cache"]
     lines += [f"CA-NAC caches: {c['npy_files']} .npy files, {c['npy_bytes']} bytes; stored window "
