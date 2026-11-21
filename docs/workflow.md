@@ -118,6 +118,8 @@ Ports `SHPROP_avg.sh` + `plot_SHPROP_data.py`.
 
 - Row-wise mean of `analysis.shprop_column` across every `namd/SHPROP.*` →
   `namd/data.txt`.
+- `analysis.shprop_columns: [4, 5]` sums several columns before the fit: in a window with more than
+  one state above the target (e.g. CBM and CBM+1), the surviving population is spread over them.
 - Fits `p(t) = exp(-t / A)` (time converted from `analysis.time_in` to
   `analysis.fit_time_unit`). `A` is τ. Writes `shprop_fit.json` (τ, unit, R²)
   and `shprop_fit.png`. WARNs if R² < 0.9.

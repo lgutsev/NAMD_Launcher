@@ -112,6 +112,7 @@ namd:
 # ---------------------------------------------------------------------------
 analysis:
   shprop_column: 4           # column averaged across SHPROP.* (target-state population)
+  # shprop_columns: [4, 5]    # instead: sum these columns (population spread over several states)
   time_in: fs                # units of SHPROP column 1
   fit_time_unit: ns          # x-axis unit for exp(-t/A)
   model: single_exp

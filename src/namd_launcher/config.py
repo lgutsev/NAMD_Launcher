@@ -237,6 +237,17 @@ def _validate_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
     analysis["shprop_column"] = _int(analysis.get("shprop_column", 4), "analysis.shprop_column")
     if analysis["shprop_column"] < 1:
         raise ConfigurationError("analysis.shprop_column must be positive (1-based)")
+    # Several columns are summed: with more than one state above the target (e.g. CBM and CBM+1 in a
+    # three-band window) the surviving population is spread over them.
+    cols = analysis.get("shprop_columns")
+    if cols is None:
+        analysis["shprop_columns"] = [analysis["shprop_column"]]
+    else:
+        if not isinstance(cols, list) or not cols:
+            raise ConfigurationError("analysis.shprop_columns must be a non-empty list of 1-based columns")
+        analysis["shprop_columns"] = [_int(c, "analysis.shprop_columns") for c in cols]
+        if min(analysis["shprop_columns"]) < 1 or len(set(analysis["shprop_columns"])) != len(cols):
+            raise ConfigurationError("analysis.shprop_columns must be distinct positive (1-based) columns")
     analysis["time_in"] = str(analysis.get("time_in", "fs")).lower()
     analysis["fit_time_unit"] = str(analysis.get("fit_time_unit", "ns")).lower()
     for unit_key in ("time_in", "fit_time_unit"):

@@ -54,3 +54,20 @@ def test_run_shprop_needs_files(campaign_dir: Path) -> None:
     campaign = load_campaign(campaign_dir / "namd_campaign.yaml")
     with pytest.raises(SafetyError, match="No SHPROP"):
         run_shprop(campaign)
+
+
+def test_run_shprop_sums_columns(campaign_dir: Path) -> None:
+    """Three states: the surviving population is split between columns 4 and 5; their sum decays with tau."""
+    namd = campaign_dir / "namd"
+    namd.mkdir(parents=True, exist_ok=True)
+    t = np.linspace(0.0, 3.0e5, 120)
+    pop = np.exp(-t / 1.0e5)
+    for k in range(3):
+        np.savetxt(namd / f"SHPROP.{k + 1}", np.column_stack([t, np.ones_like(t), 1.0 - pop, 0.6 * pop, 0.4 * pop]))
+    yaml = campaign_dir / "namd_campaign.yaml"
+    text = yaml.read_text(encoding="utf-8")
+    assert "analysis:" not in text
+    yaml.write_text(text + "analysis:\n  shprop_columns: [4, 5]\n", encoding="utf-8")
+    result = run_shprop(load_campaign(yaml))
+    assert result["columns"] == [4, 5]
+    assert result["tau"] == pytest.approx(0.1, rel=1e-3)

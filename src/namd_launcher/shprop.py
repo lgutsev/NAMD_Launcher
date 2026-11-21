@@ -28,7 +28,8 @@ def _time_factor(time_in: str, fit_unit: str) -> float:
     return _TO_FS[time_in] / _TO_FS[fit_unit]
 
 
-def average_shprop(namd_root: Path, column: int) -> tuple[np.ndarray, list[str]]:
+def average_shprop(namd_root: Path, column: int | list[int]) -> tuple[np.ndarray, list[str]]:
+    """Row-wise mean across every SHPROP.* of the given column(s); other columns are SHPROP.1's."""
     files = sorted(namd_root.glob("SHPROP.*"), key=lambda p: p.name)
     if not files:
         raise SafetyError(f"No SHPROP.* files in {namd_root}. Has the Hefei-NAMD job finished?")
@@ -37,10 +38,12 @@ def average_shprop(namd_root: Path, column: int) -> tuple[np.ndarray, list[str]]
     if len(shapes) != 1:
         raise SafetyError(f"SHPROP.* files have mismatched shapes: {sorted(shapes)}")
     stacked = np.stack(arrays)
-    if column - 1 >= stacked.shape[2]:
-        raise SafetyError(f"analysis.shprop_column={column} but SHPROP files have {stacked.shape[2]} columns")
+    columns = [column] if isinstance(column, int) else list(column)
     averaged = arrays[0].copy()
-    averaged[:, column - 1] = stacked[:, :, column - 1].mean(axis=0)
+    for c in columns:
+        if c - 1 >= stacked.shape[2]:
+            raise SafetyError(f"analysis column {c} but SHPROP files have {stacked.shape[2]} columns")
+        averaged[:, c - 1] = stacked[:, :, c - 1].mean(axis=0)
     return averaged, [f.name for f in files]
 
 
@@ -96,8 +99,9 @@ def _plot(time: np.ndarray, y: np.ndarray, fit: dict[str, float], unit: str, out
 def run_shprop(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
     namd_root = campaign.stage_dir("namd")
     analysis = campaign.analysis
-    column = int(analysis["shprop_column"])
-    averaged, files = average_shprop(namd_root, column)
+    columns = [int(c) for c in analysis.get("shprop_columns", [analysis["shprop_column"]])]
+    column = columns[0]
+    averaged, files = average_shprop(namd_root, columns)
 
     data_path = namd_root / "data.txt"
     if data_path.exists() and not force:
@@ -106,7 +110,7 @@ def run_shprop(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
 
     factor = _time_factor(analysis["time_in"], analysis["fit_time_unit"])
     time = averaged[:, 0] * factor
-    population = averaged[:, column - 1]
+    population = averaged[:, [c - 1 for c in columns]].sum(axis=1)
     fit = fit_single_exp(time, population, normalize=analysis["normalize"])
 
     unit = analysis["fit_time_unit"]
@@ -120,6 +124,7 @@ def run_shprop(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
         "stage": STAGE,
         "shprop_files": len(files),
         "column": column,
+        "columns": columns,
         "time_unit_in": analysis["time_in"],
         "fit_time_unit": unit,
         "tau": round(fit["tau"], 6),
