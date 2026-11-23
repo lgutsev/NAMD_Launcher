@@ -93,9 +93,14 @@ the reference workflow gets ≈ 7 fs).
 ## 5b · `inamd inicon`
 
 Port of `INICON_gen.sh`. `nac/INICON` with `inicon.nsample` rows of
-`<start_step> <start_band>`, drawn from `[1, tmax]` × `[band_min, band_max]`,
-**deterministic** given `inicon.seed`. WARNs if `tmax` exceeds the NAC frame
-count.
+`<start_step> <start_band>`, **deterministic** given `inicon.seed`. Start
+steps are **distinct** and drawn from `[2, tmax]` (for DISH capped at
+`namd.nsw`); bands from `[band_min, band_max]`. Hefei-NAMD reads the coupling
+one step before the start (`hamil.f90`, `Dij(:,:,RTIME-1)`), so a start at
+step 1 aborts hfnamd with a bounds error, and it names each sample's output
+`SHPROP.<start>`, so a repeated start overwrites an earlier sample (both seen in
+a 100-sample DISH run, 2026-11-22). Refuses if `nsample` distinct starts do not
+fit. WARNs if `tmax` exceeds the NAC frame count.
 
 ## 6 · `inamd hefei {prepare,launch}`
 
@@ -107,7 +112,8 @@ count.
     binary `dish`) or `LSHP` (FSSH, binary `namd`); needs `NBANDS`.
   - Cross-checks `nbasis = BMAX-BMIN+1` against complete `DEPHTIME`, `NATXT`,
     and `EIGTXT` table shapes; requires `NSW ≤ NAC frames`, exactly `NSAMPLE`
-    valid `INICON` rows, active-window band indices, and algorithm-safe start
+    valid `INICON` rows, active-window band indices, and safe start steps (≥ 2,
+    distinct, ≤ `NSW` for DISH; FSSH also start + NAMDTIME within NSW)
     times — and **refuses** to prepare if any fails.
   - Stages `NATXT`, `EIGTXT`, `INICON` (+ `DEPHTIME` for DISH) into `namd/`.
 - `launch` renders `namd/run_namd.sh` from the `hefei_namd` job and submits.
@@ -123,6 +129,10 @@ Ports `SHPROP_avg.sh` + `plot_SHPROP_data.py`.
 - Fits `p(t) = exp(-t / A)` (time converted from `analysis.time_in` to
   `analysis.fit_time_unit`). `A` is τ. Writes `shprop_fit.json` (τ, unit, R²)
   and `shprop_fit.png`. WARNs if R² < 0.9.
+- Files of different lengths are refused. `--skip-incomplete` leaves out the
+  ones shorter than the rest (a sample cut off when hfnamd stopped part-way),
+  lists them in `shprop_fit.json` (`skipped_incomplete`) and WARNs. The mean is
+  a running sum, one file at a time (a 10⁷-step SHPROP is ~0.5 GB).
 
 ## Whole-campaign
 
