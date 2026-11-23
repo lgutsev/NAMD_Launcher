@@ -114,7 +114,7 @@ fit. WARNs if `tmax` exceeds the NAC frame count.
     and `EIGTXT` table shapes; requires `NSW ≤ NAC frames`, exactly `NSAMPLE`
     valid `INICON` rows, active-window band indices, and safe start steps (≥ 2,
     distinct, ≤ `NSW` for DISH; FSSH also start + NAMDTIME within NSW)
-    times — and **refuses** to prepare if any fails.
+    — and **refuses** to prepare if any fails.
   - Stages `NATXT`, `EIGTXT`, `INICON` (+ `DEPHTIME` for DISH) into `namd/`.
 - `launch` renders `namd/run_namd.sh` from the `hefei_namd` job and submits.
 
