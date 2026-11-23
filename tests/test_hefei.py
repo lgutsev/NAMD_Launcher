@@ -12,13 +12,13 @@ from namd_launcher.errors import SafetyError
 from namd_launcher.hefeinamd import audit_hefei, launch_hefei, prepare_hefei, render_inp
 
 
-def _seed_nac(nac_dir: Path, *, frames: int = 3, nbasis: int = 2, inicon_rows: int = 2) -> None:
+def _seed_nac(nac_dir: Path, *, frames: int = 3, nbasis: int = 2, inicon_rows: int = 1) -> None:
     nac_dir.mkdir(parents=True, exist_ok=True)
     nac_row = " ".join("0.001" for _ in range(nbasis * nbasis))
     eig_row = " ".join(f"-{1.0 + 0.1 * k:.3f}" for k in range(nbasis))
     (nac_dir / "NATXT").write_text("\n".join(nac_row for _ in range(frames)) + "\n", encoding="utf-8")
     (nac_dir / "EIGTXT").write_text("\n".join(eig_row for _ in range(frames)) + "\n", encoding="utf-8")
-    (nac_dir / "INICON").write_text("\n".join("1 5" for _ in range(inicon_rows)) + "\n", encoding="utf-8")
+    (nac_dir / "INICON").write_text("\n".join(f"{2 + k} 5" for k in range(inicon_rows)) + "\n", encoding="utf-8")
     (nac_dir / "DEPHTIME").write_text("    0.0000    7.0000\n    7.0000    0.0000\n", encoding="utf-8")
 
 
@@ -93,7 +93,7 @@ def test_prepare_rejects_inconsistent_natxt(campaign_dir: Path) -> None:
 
 def test_prepare_rejects_inicon_band_outside_active_window(campaign_dir: Path) -> None:
     _seed_nac(campaign_dir / "nac", inicon_rows=2)
-    (campaign_dir / "nac" / "INICON").write_text("1 5\n2 6\n", encoding="utf-8")
+    (campaign_dir / "nac" / "INICON").write_text("2 5\n3 6\n", encoding="utf-8")
     campaign = load_campaign(campaign_dir / "namd_campaign.yaml")
     with pytest.raises(SafetyError, match="outside active window"):
         prepare_hefei(campaign)
@@ -128,3 +128,15 @@ def test_dev_fssh_template(campaign_dir: Path) -> None:
     inp, meta = render_inp(campaign)
     assert 'ALGO       = "FSSH"' in inp
     assert meta["binary"] == "hfnamd"
+
+
+@pytest.mark.parametrize(
+    "rows, message",
+    [("1 5\n2 5\n", "at least 2"), ("2 5\n2 5\n", "repeats row 1"), ("2 5\n3 5\n", "exceeds NSW 2")],
+)
+def test_prepare_rejects_bad_start_steps(campaign_dir: Path, rows: str, message: str) -> None:
+    _seed_nac(campaign_dir / "nac", frames=4)
+    (campaign_dir / "nac" / "INICON").write_text(rows, encoding="utf-8")
+    campaign = load_campaign(campaign_dir / "namd_campaign.yaml")
+    with pytest.raises(SafetyError, match=message):
+        prepare_hefei(campaign)

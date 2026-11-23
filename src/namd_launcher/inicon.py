@@ -1,8 +1,12 @@
 """Stage 5b -- INICON initial conditions for Hefei-NAMD.
 
 Port of ``INICON_gen.sh``: NSAMPLE rows of ``<start_step> <start_band>`` with
-the start step drawn uniformly from ``[1, tmax]`` and the start band from
-``[band_min, band_max]``. Deterministic given ``inicon.seed``.
+the start band drawn uniformly from ``[band_min, band_max]``. Deterministic given ``inicon.seed``.
+
+Start steps are distinct and drawn uniformly from ``[2, tmax]`` (for DISH also at most ``namd.nsw``):
+Hefei-NAMD reads the coupling one step before the start (``hamil.f90``: ``Dij(:,:,RTIME-1)``; ``dish.F90``:
+NAMDTINI >= 2), so a start at step 1 aborts the run, and it names each sample's output after its start step
+(``SHPROP.<start>``), so a repeated start overwrites an earlier sample.
 """
 
 from __future__ import annotations
@@ -39,6 +43,16 @@ def generate_inicon(campaign: Campaign, *, force: bool = False) -> dict[str, Any
     seed = int(cfg.get("seed", 0))
     if tmax < 1 or nsample < 1:
         raise SafetyError("inicon.tmax and inicon.nsample must be positive")
+    lo, hi = 2, tmax
+    notes: list[str] = []
+    if campaign.namd["algo"] == "DISH" and campaign.namd.get("nsw") is not None and hi > int(campaign.namd["nsw"]):
+        hi = int(campaign.namd["nsw"])
+        notes.append(f"start steps capped at namd.nsw={hi} (inicon.tmax={tmax})")
+    if hi - lo + 1 < nsample:
+        raise SafetyError(
+            f"inicon: {nsample} distinct start steps are needed but only [{lo}, {hi}] is available "
+            "(Hefei-NAMD needs start >= 2 and names each sample SHPROP.<start>)"
+        )
 
     nac_root = campaign.stage_dir("nac")
     nac_root.mkdir(parents=True, exist_ok=True)
@@ -47,10 +61,10 @@ def generate_inicon(campaign: Campaign, *, force: bool = False) -> dict[str, Any
         raise SafetyError(f"{target} already exists; re-run with --force.")
 
     rng = random.Random(seed)
-    rows = [(rng.randint(1, tmax), rng.randint(b_lo, b_hi)) for _ in range(nsample)]
+    starts = rng.sample(range(lo, hi + 1), nsample)
+    rows = [(t, rng.randint(b_lo, b_hi)) for t in starts]
     target.write_text("".join(f"{t} {b}\n" for t, b in rows), encoding="utf-8")
 
-    notes: list[str] = []
     status = "PASS"
     frames = _nac_frames(nac_root)
     namdtime = campaign.namd.get("namdtime")
@@ -73,6 +87,7 @@ def generate_inicon(campaign: Campaign, *, force: bool = False) -> dict[str, Any
         "inicon": str(target),
         "nsample": nsample,
         "tmax": tmax,
+        "start_range": [lo, hi],
         "band_range": [b_lo, b_hi],
         "seed": seed,
         "nac_frames": frames,

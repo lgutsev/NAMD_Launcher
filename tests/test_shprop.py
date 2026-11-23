@@ -71,3 +71,19 @@ def test_run_shprop_sums_columns(campaign_dir: Path) -> None:
     result = run_shprop(load_campaign(yaml))
     assert result["columns"] == [4, 5]
     assert result["tau"] == pytest.approx(0.1, rel=1e-3)
+
+
+def test_run_shprop_skip_incomplete(campaign_dir: Path) -> None:
+    """A run stopped part-way leaves one short SHPROP: refused by default, left out and listed when asked."""
+    namd = campaign_dir / "namd"
+    _write_shprop(namd, n_files=4, tau_fs=1.0e5)
+    (namd / "SHPROP.1").write_text("0 1 0 1\n", encoding="utf-8")  # one row, as hfnamd leaves it
+    campaign = load_campaign(campaign_dir / "namd_campaign.yaml")
+    with pytest.raises(SafetyError, match="mismatched shapes: SHPROP.1 1 rows"):
+        run_shprop(campaign)
+    assert not (namd / "data.txt").exists()
+    result = run_shprop(campaign, skip_incomplete=True)
+    assert result["shprop_files"] == 3
+    assert result["skipped_incomplete"] == [{"file": "SHPROP.1", "rows": 1, "full_rows": 120}]
+    assert result["status"] == "WARN" and "left out (incomplete): SHPROP.1" in result["note"]
+    assert result["tau"] == pytest.approx(0.1, rel=0.05)

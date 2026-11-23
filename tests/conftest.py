@@ -45,7 +45,7 @@ def campaign_dir(tmp_path: Path) -> Path:
               gamma: true
               nproc: 2
             inicon:
-              nsample: 2
+              nsample: 1
               tmax: 3
               band_min: 5
               band_max: 5
@@ -55,8 +55,8 @@ def campaign_dir(tmp_path: Path) -> Path:
               algo: DISH
               bmin: 4
               bmax: 5
-              nsw: 1
-              nsample: 2
+              nsw: 2
+              nsample: 1
               ntraj: 10
               nelm: 5
               namdtime: 200

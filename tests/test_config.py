@@ -88,8 +88,8 @@ def test_rejects_single_state_hefei_window(campaign_dir: Path) -> None:
 
 def test_rejects_mismatched_initial_condition_count(campaign_dir: Path) -> None:
     path = campaign_dir / "namd_campaign.yaml"
-    # The fixture uses nsample: 2 in both blocks; change only the first occurrence.
-    text = path.read_text(encoding="utf-8").replace("nsample: 2", "nsample: 3", 1)
+    # The fixture uses nsample: 1 in both blocks; change only the first occurrence.
+    text = path.read_text(encoding="utf-8").replace("nsample: 1", "nsample: 3", 1)
     path.write_text(text, encoding="utf-8")
     with pytest.raises(ConfigurationError, match="must equal"):
         load_campaign(path)

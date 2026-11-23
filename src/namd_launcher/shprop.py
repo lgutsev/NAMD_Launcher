@@ -28,22 +28,61 @@ def _time_factor(time_in: str, fit_unit: str) -> float:
     return _TO_FS[time_in] / _TO_FS[fit_unit]
 
 
-def average_shprop(namd_root: Path, column: int | list[int]) -> tuple[np.ndarray, list[str]]:
-    """Row-wise mean across every SHPROP.* of the given column(s); other columns are SHPROP.1's."""
+def _count_rows(path: Path) -> int:
+    """Number of lines, read in chunks (SHPROP files of a 10^7-step DISH run are ~0.5 GB each)."""
+    n, last = 0, b"\n"
+    with path.open("rb") as fh:
+        while chunk := fh.read(1 << 24):
+            n += chunk.count(b"\n")
+            last = chunk[-1:]
+    return n + (last != b"\n")
+
+
+def shprop_files(namd_root: Path, *, skip_incomplete: bool = False) -> tuple[list[Path], list[dict[str, Any]]]:
+    """The SHPROP.* files to average, and those left out.
+
+    With ``skip_incomplete`` the files shorter than the longest are left out: hfnamd writes a sample's SHPROP as
+    it runs, so a run that stopped part-way leaves one short file beside the finished ones. Without it a length
+    mismatch is refused, as before.
+    """
     files = sorted(namd_root.glob("SHPROP.*"), key=lambda p: p.name)
     if not files:
         raise SafetyError(f"No SHPROP.* files in {namd_root}. Has the Hefei-NAMD job finished?")
-    arrays = [np.loadtxt(f) for f in files]
-    shapes = {a.shape for a in arrays}
-    if len(shapes) != 1:
-        raise SafetyError(f"SHPROP.* files have mismatched shapes: {sorted(shapes)}")
-    stacked = np.stack(arrays)
+    rows = {f: _count_rows(f) for f in files}
+    full = max(rows.values())
+    short = [f for f in files if rows[f] != full]
+    if short and not skip_incomplete:
+        raise SafetyError(
+            "SHPROP.* files have mismatched shapes: "
+            + ", ".join(f"{f.name} {rows[f]} rows" for f in short)
+            + f" (the others {full}); --skip-incomplete leaves the short ones out"
+        )
+    skipped = [{"file": f.name, "rows": rows[f], "full_rows": full} for f in short]
+    return [f for f in files if rows[f] == full], skipped
+
+
+def average_shprop(
+    namd_root: Path, column: int | list[int], *, files: list[Path] | None = None
+) -> tuple[np.ndarray, list[str]]:
+    """Row-wise mean across the SHPROP.* files of the given column(s); other columns are the first file's.
+
+    One file is held at a time (a running sum), so memory does not grow with the number of samples.
+    """
+    if files is None:
+        files, _ = shprop_files(namd_root)
     columns = [column] if isinstance(column, int) else list(column)
-    averaged = arrays[0].copy()
+    averaged = np.loadtxt(files[0], ndmin=2)
     for c in columns:
-        if c - 1 >= stacked.shape[2]:
-            raise SafetyError(f"analysis column {c} but SHPROP files have {stacked.shape[2]} columns")
-        averaged[:, c - 1] = stacked[:, :, c - 1].mean(axis=0)
+        if c - 1 >= averaged.shape[1]:
+            raise SafetyError(f"analysis column {c} but SHPROP files have {averaged.shape[1]} columns")
+    idx = [c - 1 for c in columns]
+    sums = averaged[:, idx].copy()
+    for f in files[1:]:
+        block = np.loadtxt(f, ndmin=2, usecols=idx)
+        if block.shape != sums.shape:
+            raise SafetyError(f"SHPROP.* files have mismatched shapes: {f.name} {block.shape} vs {sums.shape}")
+        sums += block
+    averaged[:, idx] = sums / len(files)
     return averaged, [f.name for f in files]
 
 
@@ -96,16 +135,16 @@ def _plot(time: np.ndarray, y: np.ndarray, fit: dict[str, float], unit: str, out
     return str(out)
 
 
-def run_shprop(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
+def run_shprop(campaign: Campaign, *, force: bool = False, skip_incomplete: bool = False) -> dict[str, Any]:
     namd_root = campaign.stage_dir("namd")
     analysis = campaign.analysis
     columns = [int(c) for c in analysis.get("shprop_columns", [analysis["shprop_column"]])]
     column = columns[0]
-    averaged, files = average_shprop(namd_root, columns)
-
     data_path = namd_root / "data.txt"
     if data_path.exists() and not force:
         raise SafetyError(f"{data_path} already exists; re-run with --force.")
+    used, skipped = shprop_files(namd_root, skip_incomplete=skip_incomplete)
+    averaged, files = average_shprop(namd_root, columns, files=used)
     np.savetxt(data_path, averaged, fmt="%.15g")
 
     factor = _time_factor(analysis["time_in"], analysis["fit_time_unit"])
@@ -123,6 +162,7 @@ def run_shprop(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
     payload = {
         "stage": STAGE,
         "shprop_files": len(files),
+        "skipped_incomplete": skipped,
         "column": column,
         "columns": columns,
         "time_unit_in": analysis["time_in"],
@@ -143,6 +183,9 @@ def run_shprop(campaign: Campaign, *, force: bool = False) -> dict[str, Any]:
     note = f"tau = {fit['tau']:.4g} {unit}, R^2 = {fit['r_squared']:.4f} over {len(files)} SHPROP files"
     if fit["r_squared"] < 0.9:
         note += " -- low R^2: the run may be too short, or the decay is not single-exponential"
+    if skipped:
+        status = "WARN" if status == "PASS" else status
+        note += "; left out (incomplete): " + ", ".join(f"{s['file']} ({s['rows']} of {s['full_rows']} rows)" for s in skipped)
     audit = {"status": status, "summary": note, **payload}
     write_audit(namd_root, STAGE, audit)
     state = StateStore(campaign.root)
@@ -171,7 +214,7 @@ def _cmd(args: argparse.Namespace) -> int:
     if getattr(args, "shprop_audit", False):
         _json(audit_shprop(campaign))
         return 0
-    _json(run_shprop(campaign, force=args.force))
+    _json(run_shprop(campaign, force=args.force, skip_incomplete=args.skip_incomplete))
     return 0
 
 
@@ -180,5 +223,9 @@ def _register(commands: Any, add_campaign_option: Any) -> None:
     parser = commands.add_parser(STAGE, help="Average SHPROP.* and fit exp(-t/A) -> tau")
     add_campaign_option(parser)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument(
+        "--skip-incomplete", action="store_true",
+        help="leave out SHPROP files shorter than the rest (a sample cut off when hfnamd stopped); listed in the fit",
+    )
     parser.add_argument("--audit", dest="shprop_audit", action="store_true")
     parser.set_defaults(func=_cmd)

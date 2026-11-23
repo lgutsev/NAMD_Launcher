@@ -72,7 +72,7 @@ def test_inicon_deterministic(campaign_dir: Path) -> None:
     assert len(lines) == campaign.inicon["nsample"]
     for line in lines:
         t, b = map(int, line.split())
-        assert 1 <= t <= 3
+        assert t == 2
         assert 5 <= b <= 6
     assert first["status"] in {"PASS", "WARN"}
 
@@ -85,3 +85,21 @@ def test_inicon_warns_when_tmax_exceeds_frames(campaign_dir: Path) -> None:
     result = generate_inicon(campaign)
     assert result["status"] == "WARN"
     assert any("exceeds" in n for n in result["notes"])
+
+
+def test_inicon_starts_distinct_and_at_least_two(campaign_dir: Path) -> None:
+    """hfnamd reads the step before the start (start 1 aborts, PD031) and names output SHPROP.<start>."""
+    text = (campaign_dir / "namd_campaign.yaml").read_text(encoding="utf-8")
+    text = text.replace("nsw: 3\n", "nsw: 60\n").replace("tmax: 3\n", "tmax: 60\n").replace("nsw: 2\n", "nsw: 40\n")
+    text = text.replace("nsample: 1\n", "nsample: 39\n")
+    (campaign_dir / "namd_campaign.yaml").write_text(text, encoding="utf-8")
+    campaign = load_campaign(campaign_dir / "namd_campaign.yaml")
+    result = generate_inicon(campaign)
+    starts = [int(line.split()[0]) for line in (campaign_dir / "nac" / "INICON").read_text(encoding="utf-8").splitlines()]
+    assert sorted(starts) == list(range(2, 41))  # all 39 of [2, nsw=40]: DISH caps tmax at namd.nsw
+    assert result["start_range"] == [2, 40]
+    assert any("capped" in n for n in result["notes"])
+    text = text.replace("nsample: 39\n", "nsample: 40\n")
+    (campaign_dir / "namd_campaign.yaml").write_text(text, encoding="utf-8")
+    with pytest.raises(SafetyError, match="distinct start steps"):
+        generate_inicon(load_campaign(campaign_dir / "namd_campaign.yaml"), force=True)

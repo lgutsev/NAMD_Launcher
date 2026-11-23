@@ -71,14 +71,24 @@ def _validate_inicon_rows(campaign: Campaign, path: Path, frames: int) -> list[s
     bmin, bmax = int(campaign.namd["bmin"]), int(campaign.namd["bmax"])
     algo = campaign.namd["algo"]
     namdtime = int(campaign.namd["namdtime"])
+    seen: dict[int, int] = {}
     for index, (start, band) in enumerate(parsed, start=1):
         if not bmin <= band <= bmax:
             issues.append(f"INICON row {index}: band {band} is outside active window [{bmin}, {bmax}]")
         if not 1 <= start <= frames:
             issues.append(f"INICON row {index}: start step {start} is outside available frames [1, {frames}]")
+        if start <= 1:
+            # hamil.f90 reads Dij(:,:,RTIME-1): a start at step 1 aborts hfnamd (PD031, 2026-11-22)
+            issues.append(f"INICON row {index}: start step must be at least 2 (Hefei-NAMD reads the step before it)")
+        if algo == "DISH" and start > int(campaign.namd["nsw"]):
+            issues.append(f"INICON row {index}: DISH start step {start} exceeds NSW {campaign.namd['nsw']}")
+        if start in seen:
+            issues.append(
+                f"INICON row {index}: start step {start} repeats row {seen[start]} "
+                f"(both samples write SHPROP.{start}; the later overwrites the earlier)"
+            )
+        seen.setdefault(start, index)
         if algo == "FSSH":
-            if start <= 1:
-                issues.append(f"INICON row {index}: FSSH start step must be greater than 1")
             if start + namdtime - 1 > int(campaign.namd["nsw"]):
                 issues.append(
                     f"INICON row {index}: FSSH start {start} + NAMDTIME {namdtime} exceeds NSW "
